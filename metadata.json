@@ -1,0 +1,8 @@
+{
+  "name": "AutoDevOps AI",
+  "description": "An autonomous self-healing codebase agent that detects, diagnoses, and fixes software bugs without human intervention.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
