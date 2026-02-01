@@ -2,7 +2,7 @@
 import React from 'react';
 import { AgentStep } from './types';
 
-// Add explicit AgentStep[] type to ensure status literals match the StepStatus type
+// Initial pipeline steps for the autonomous agent
 export const INITIAL_STEPS: AgentStep[] = [
   { id: 'ingest', label: 'Repository Ingestion', status: 'pending', description: 'Analyzing repository structure and dependencies.' },
   { id: 'test', label: 'Test Execution', status: 'pending', description: 'Running existing test suites to baseline system health.' },
@@ -26,22 +26,4 @@ export const Icons = {
   Security: () => <span className="material-symbols-outlined">security</span>,
   Cloud: () => <span className="material-symbols-outlined">cloud_done</span>,
   Psychology: () => <span className="material-symbols-outlined">psychology</span>,
-};
-
-export const MOCK_DIFF = {
-  filePath: 'src/services/auth.ts',
-  explanation: 'The agent detected an unhandled null return from the database layer. Added a guard clause to prevent the NullPointerException.',
-  before: [
-    { type: 'neutral', content: '  async login(credentials) {', lineNumber: 39 },
-    { type: 'neutral', content: '    const user = await db.users.find(credentials.id);', lineNumber: 40 },
-    { type: 'removed', content: '    return { success: true, user: user.profile };', lineNumber: 41 },
-    { type: 'neutral', content: '  }', lineNumber: 42 },
-  ],
-  after: [
-    { type: 'neutral', content: '  async login(credentials) {', lineNumber: 39 },
-    { type: 'neutral', content: '    const user = await db.users.find(credentials.id);', lineNumber: 40 },
-    { type: 'added', content: '    if (!user) throw new AuthError("User not found");', lineNumber: 41 },
-    { type: 'added', content: '    return { success: true, user: user.profile };', lineNumber: 42 },
-    { type: 'neutral', content: '  }', lineNumber: 43 },
-  ]
 };

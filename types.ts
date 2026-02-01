@@ -1,5 +1,5 @@
 
-export type AppView = 'landing' | 'setup' | 'dashboard' | 'report';
+export type AppView = 'landing' | 'auth' | 'setup' | 'dashboard' | 'report' | 'privacy' | 'terms';
 
 export type StepStatus = 'pending' | 'running' | 'success' | 'failed';
 
@@ -18,16 +18,6 @@ export interface LogEntry {
   timestamp: string;
 }
 
-export interface AgentState {
-  currentAttempt: number;
-  maxAttempts: number;
-  confidence: number;
-  riskLevel: 'Low' | 'Medium' | 'High';
-  memory: string[];
-  repoUrl: string;
-  branch: string;
-}
-
 export interface DiffLine {
   type: 'added' | 'removed' | 'neutral';
   content: string;
@@ -39,4 +29,20 @@ export interface CodeFix {
   explanation: string;
   before: DiffLine[];
   after: DiffLine[];
+}
+
+export interface AgentState {
+  currentAttempt: number;
+  maxAttempts: number;
+  confidence: number;
+  riskLevel: 'Low' | 'Medium' | 'High';
+  memory: string[];
+  repoUrl: string;
+  branch: string;
+  // Dynamic fields
+  techStack?: string;
+  detectedError?: string;
+  generatedDiff?: CodeFix;
+  reportSummary?: string;
+  simulationId?: string;
 }
