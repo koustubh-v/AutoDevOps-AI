@@ -8,11 +8,12 @@ interface SetupPageProps {
   onBack: () => void;
   history?: any[];
   onLoadSession?: (session: any) => void;
+  onDeleteSession?: (sessionId: string) => void;
 }
 
 const BACKEND_API_URL = "https://git-service-1078683595470.us-central1.run.app";
 
-const SetupPage: React.FC<SetupPageProps> = ({ onLaunch, onBack, history = [], onLoadSession }) => {
+const SetupPage: React.FC<SetupPageProps> = ({ onLaunch, onBack, history = [], onLoadSession, onDeleteSession }) => {
   const [repo, setRepo] = useState('');
   const [branch, setBranch] = useState('main');
   const [techStack, setTechStack] = useState('Auto-Detect');
@@ -248,27 +249,39 @@ const SetupPage: React.FC<SetupPageProps> = ({ onLaunch, onBack, history = [], o
                 : 'Unknown Repo';
 
               return (
-                <button 
-                  key={session.id} 
-                  onClick={() => onLoadSession?.(session)} 
-                  className="w-full text-left p-4 rounded-2xl hover:bg-[#2d2e30] transition-colors group border border-transparent hover:border-[#3c4043]"
-                >
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="text-sm font-medium text-[#e3e3e3] truncate max-w-[150px]">
-                      {repoName}
-                    </span>
-                    <span className="text-xs text-[#9aa0a6]">
-                      {session.createdAt?.seconds 
-                        ? new Date(session.createdAt.seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-                        : 'Just now'
-                      }
-                    </span>
+                <div key={session.id} className="relative group">
+                  <div 
+                    onClick={() => onLoadSession?.(session)} 
+                    className="w-full text-left p-4 rounded-2xl hover:bg-[#2d2e30] transition-colors border border-transparent hover:border-[#3c4043] cursor-pointer"
+                  >
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-sm font-medium text-[#e3e3e3] truncate max-w-[160px]">
+                        {repoName}
+                      </span>
+                      <span className="text-xs text-[#9aa0a6] group-hover:opacity-0 transition-opacity duration-200">
+                        {session.createdAt?.seconds 
+                          ? new Date(session.createdAt.seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                          : 'Just now'
+                        }
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                       <span className="w-1.5 h-1.5 rounded-full bg-[#81c995]"></span>
+                       <span className="text-xs text-[#c4c7c5]">{session.agentState?.techStack || 'Detected'}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
-                     <span className="w-1.5 h-1.5 rounded-full bg-[#81c995]"></span>
-                     <span className="text-xs text-[#c4c7c5]">{session.agentState?.techStack || 'Detected'}</span>
-                  </div>
-                </button>
+                  {/* Delete Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession?.(session.id);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-[#9aa0a6] hover:text-[#f28b82] hover:bg-[#f28b82]/10 rounded-full opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
+                    title="Delete Session"
+                  >
+                    <span className="material-symbols-outlined">delete</span>
+                  </button>
+                </div>
               );
             }) : (
               <div className="flex flex-col items-center justify-center h-48 opacity-40">

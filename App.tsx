@@ -1,6 +1,7 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
-import { collection, getDocs, query, orderBy, Timestamp, setDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, Timestamp, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { auth, db } from './services/firebase';
 import { AppView, AgentStep, LogEntry, AgentState, StepStatus, Issue } from './types';
 import { INITIAL_STEPS } from './constants';
@@ -66,6 +67,16 @@ const App: React.FC = () => {
       setHistory(loadedHistory);
     } catch (e) {
       console.error("History fetch error:", e);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, `users/${user.uid}/sessions`, sessionId));
+      setHistory(prev => prev.filter(s => s.id !== sessionId));
+    } catch (e) {
+      console.error("Failed to delete session:", e);
     }
   };
 
@@ -277,7 +288,7 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-[#131314] text-[#e3e3e3] font-sans">
       {view === 'landing' && <LandingPage onStart={handleStart} user={user} onLogout={handleLogout} onViewLegal={(type) => setView(type)} />}
       {view === 'auth' && <AuthPage onSuccess={() => setView('setup')} onBack={() => setView('landing')} />}
-      {view === 'setup' && <SetupPage onLaunch={(config) => startAutonomousRun(config)} onBack={() => setView('landing')} history={history} onLoadSession={loadSession} />}
+      {view === 'setup' && <SetupPage onLaunch={(config) => startAutonomousRun(config)} onBack={() => setView('landing')} history={history} onLoadSession={loadSession} onDeleteSession={handleDeleteSession} />}
       {view === 'dashboard' && <Dashboard steps={steps} logs={logs} agentState={agentState} onLogout={handleLogout} />}
       {view === 'report' && <ReportPage agentState={agentState} steps={steps} logs={logs} onReset={() => { setSteps(INITIAL_STEPS); setLogs([]); setView('setup'); }} />}
       {(view === 'privacy' || view === 'terms') && <LegalPage type={view} onBack={() => setView('landing')} />}
