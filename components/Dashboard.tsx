@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { AgentStep, LogEntry, AgentState } from '../types';
 import { Icons } from '../constants';
 
@@ -181,9 +182,36 @@ const Dashboard: React.FC<DashboardProps> = ({ steps, logs, agentState, onLogout
                         </span>
                         <span className="text-xs text-[#5f6368] whitespace-nowrap ml-2">{log.timestamp}</span>
                       </div>
-                      <p className={`text-sm leading-relaxed break-words ${log.type === 'reasoning' ? 'text-[#d3e3fd]' : 'text-[#c4c7c5]'}`}>
-                        {log.message}
-                      </p>
+                      <div className={`text-sm leading-relaxed break-words ${log.type === 'reasoning' ? 'text-[#d3e3fd]' : 'text-[#c4c7c5]'}`}>
+                        {log.type === 'reasoning' ? (
+                          <ReactMarkdown 
+                            components={{
+                              h1: ({children}) => <h1 className="text-lg font-bold text-[#e3e3e3] mt-3 mb-2">{children}</h1>,
+                              h2: ({children}) => <h2 className="text-base font-bold text-[#e3e3e3] mt-3 mb-2">{children}</h2>,
+                              h3: ({children}) => <h3 className="text-sm font-bold text-[#e3e3e3] mt-2 mb-1">{children}</h3>,
+                              ul: ({children}) => <ul className="list-disc pl-5 my-2 space-y-1">{children}</ul>,
+                              ol: ({children}) => <ol className="list-decimal pl-5 my-2 space-y-1">{children}</ol>,
+                              code: ({node, inline, className, children, ...props}: any) => {
+                                return !inline ? (
+                                  <div className="bg-[#131314] p-3 rounded-lg border border-[#3c4043] my-2 overflow-x-auto font-mono text-xs shadow-inner">
+                                    <code className={className} {...props}>
+                                      {children}
+                                    </code>
+                                  </div>
+                                ) : (
+                                  <code className="bg-[#131314] px-1.5 py-0.5 rounded text-xs font-mono border border-[#3c4043]" {...props}>
+                                    {children}
+                                  </code>
+                                )
+                              }
+                            }}
+                          >
+                            {log.message}
+                          </ReactMarkdown>
+                        ) : (
+                          log.message
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}

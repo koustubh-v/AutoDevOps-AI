@@ -64,13 +64,13 @@ const ReportPage: React.FC<ReportPageProps> = ({ agentState, steps, logs, onRese
         </div>
 
         {/* Right Content */}
-        <div className="flex-1 p-8 md:p-16">
+        <div className="flex-1 p-8 md:p-16 w-full min-w-0">
           <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-8">
             <div>
               <h1 className="text-3xl md:text-5xl font-google font-bold mb-2 tracking-tight">Post-Mortem Analysis</h1>
               <p className="text-lg md:text-xl text-[#5f6368] font-light">Codebase stability restored via autonomous reconciliation.</p>
             </div>
-            <div className="px-4 py-2 bg-emerald-50 border border-emerald-100 rounded-full text-emerald-700 text-sm font-bold flex items-center gap-2">
+            <div className="px-4 py-2 bg-emerald-50 border border-emerald-100 rounded-full text-emerald-700 text-sm font-bold flex items-center gap-2 shrink-0">
               Verified by Gemini-3
             </div>
           </div>
@@ -90,7 +90,7 @@ const ReportPage: React.FC<ReportPageProps> = ({ agentState, steps, logs, onRese
             ))}
           </div>
 
-          <div className="space-y-12">
+          <div className="space-y-12 w-full min-w-0">
             <div>
               <h3 className="text-lg font-bold border-b border-[#dadce0] pb-3 mb-6 flex items-center gap-2 text-[#1a73e8]">
                 <Icons.Sparkle /> Executive Reasoning Summary
@@ -99,7 +99,7 @@ const ReportPage: React.FC<ReportPageProps> = ({ agentState, steps, logs, onRese
                 <div className="absolute top-4 right-4 text-[#e8eaed] opacity-50 pointer-events-none">
                    <span className="material-symbols-outlined text-4xl">format_quote</span>
                 </div>
-                <div className="prose prose-slate prose-sm md:prose-base max-w-none prose-headings:font-google prose-headings:mb-4 prose-p:leading-relaxed prose-pre:bg-[#131314] prose-pre:text-white">
+                <div className="prose prose-slate prose-sm md:prose-base max-w-none prose-headings:font-google prose-headings:mb-4 prose-p:leading-relaxed prose-pre:bg-[#131314] prose-pre:text-white prose-pre:p-4 prose-pre:rounded-xl prose-pre:overflow-x-auto prose-pre:max-w-[80vw] md:prose-pre:max-w-none">
                   {agentState.reportSummary ? (
                     <ReactMarkdown>{agentState.reportSummary}</ReactMarkdown>
                   ) : (
@@ -116,34 +116,38 @@ const ReportPage: React.FC<ReportPageProps> = ({ agentState, steps, logs, onRese
                 </h3>
                 <div className="bg-white border border-[#dadce0] rounded-[24px] overflow-hidden shadow-sm">
                   <div className="bg-[#f8f9fa] px-6 py-4 border-b border-[#dadce0] flex items-center justify-between">
-                     <div className="flex items-center gap-2">
-                       <span className="material-symbols-outlined text-lg text-[#5f6368]">description</span>
-                       <span className="text-sm font-mono text-[#3c4043]">{diff.filePath}</span>
+                     <div className="flex items-center gap-2 overflow-hidden">
+                       <span className="material-symbols-outlined text-lg text-[#5f6368] shrink-0">description</span>
+                       <span className="text-sm font-mono text-[#3c4043] truncate">{diff.filePath}</span>
                      </div>
-                     <div className="text-[10px] bg-[#e8f0fe] text-[#1a73e8] px-2 py-1 rounded font-bold">GEMINI_PATCH_CERTIFIED</div>
+                     <div className="text-[10px] bg-[#e8f0fe] text-[#1a73e8] px-2 py-1 rounded font-bold shrink-0 ml-2">GEMINI_PATCH_CERTIFIED</div>
                   </div>
-                  <div className="p-6">
+                  <div className="p-4 md:p-6">
                     <p className="text-sm text-[#5f6368] mb-6 italic leading-relaxed">
                       "{diff.explanation}"
                     </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="bg-[#131314] text-[#e3e3e3] p-6 rounded-2xl font-mono text-xs overflow-x-auto">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      <div className="bg-[#131314] text-[#e3e3e3] p-4 md:p-6 rounded-2xl font-mono text-xs overflow-x-auto w-full">
                          <p className="text-[#5f6368] mb-4 uppercase text-[10px] font-bold tracking-widest border-b border-[#3c4043] pb-2">Baseline Version</p>
-                         {(diff.before || []).map((line, i) => (
-                           <div key={i} className={`flex gap-4 ${line.type === 'removed' ? 'bg-[#f28b82]/20 text-[#f28b82]' : ''}`}>
-                              <span className="text-[#5f6368] w-8 text-right shrink-0">{line.lineNumber}</span>
-                              <pre className="whitespace-pre">{line.content}</pre>
-                           </div>
-                         ))}
+                         <div className="min-w-max">
+                           {(diff.before || []).map((line, i) => (
+                             <div key={i} className={`flex gap-4 ${line.type === 'removed' ? 'bg-[#f28b82]/20 text-[#f28b82]' : ''}`}>
+                                <span className="text-[#5f6368] w-8 text-right shrink-0 select-none">{line.lineNumber}</span>
+                                <pre className="whitespace-pre">{line.content}</pre>
+                             </div>
+                           ))}
+                         </div>
                       </div>
-                      <div className="bg-[#131314] text-[#e3e3e3] p-6 rounded-2xl font-mono text-xs overflow-x-auto">
+                      <div className="bg-[#131314] text-[#e3e3e3] p-4 md:p-6 rounded-2xl font-mono text-xs overflow-x-auto w-full">
                          <p className="text-[#5f6368] mb-4 uppercase text-[10px] font-bold tracking-widest border-b border-[#3c4043] pb-2">Stabilized Version</p>
-                         {(diff.after || []).map((line, i) => (
-                           <div key={i} className={`flex gap-4 ${line.type === 'added' ? 'bg-[#81c995]/20 text-[#81c995]' : ''}`}>
-                              <span className="text-[#5f6368] w-8 text-right shrink-0">{line.lineNumber}</span>
-                              <pre className="whitespace-pre">{line.content}</pre>
-                           </div>
-                         ))}
+                         <div className="min-w-max">
+                           {(diff.after || []).map((line, i) => (
+                             <div key={i} className={`flex gap-4 ${line.type === 'added' ? 'bg-[#81c995]/20 text-[#81c995]' : ''}`}>
+                                <span className="text-[#5f6368] w-8 text-right shrink-0 select-none">{line.lineNumber}</span>
+                                <pre className="whitespace-pre">{line.content}</pre>
+                             </div>
+                           ))}
+                         </div>
                       </div>
                     </div>
                   </div>
