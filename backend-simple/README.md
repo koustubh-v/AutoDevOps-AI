@@ -1,248 +1,97 @@
-# AutoDevOps Git Service - Simplified Backend
+# AutoDevOps Git Microservice
 
-Minimal FastAPI microservice for git clone operations.  
-**Frontend handles all AI analysis logic.**
+> A lightweight, stateless FastAPI service designed to handle file system and Git operations for the AutoDevOps AI agent.
 
----
+## 📌 Overview
 
-## 🎯 Purpose
+This microservice acts as the "hands" of the AutoDevOps AI system. While the React frontend handles the "brain" (AI reasoning, state management), this service performs the actual physical operations on the codebase: cloning repositories, reading file contents for analysis, and cleaning up workspaces.
 
-This backend only does:
-1. ✅ Clone git repositories
-2. ✅ Serve files to frontend
-3. ✅ Cleanup on request
+It is designed to be **ephemeral** and **stateless**, making it perfect for serverless deployment platforms like **Google Cloud Run**.
 
-**Frontend does**:
-- All AI analysis
-- Test execution
-- Fix generation
-- Decision-making
+## 🔌 API Reference
 
----
-
-## 📡 API Endpoints
+### Health Check
+`GET /health`
+Returns the operational status of the service and active session count.
 
 ### 1. Clone Repository
-```bash
-POST /clone
+**Endpoint**: `POST /clone`
+**Description**: Clones a public Git repository into a temporary isolated session.
+
+**Request Body:**
+```json
 {
-  "repo_url": "https://github.com/user/repo.git",
+  "repo_url": "https://github.com/username/repo.git",
   "branch": "main"
 }
+```
 
-Response:
+**Response:**
+```json
 {
-  "session_id": "sess_abc123",
+  "session_id": "sess_a1b2c3d4e5f6",
   "status": "cloned",
-  "repo_path": "/files/sess_abc123"
+  "repo_path": "/files/sess_a1b2c3d4e5f6"
 }
 ```
 
 ### 2. List Files
-```bash
-GET /files/{session_id}
+**Endpoint**: `GET /files/{session_id}`
+**Description**: returns a flat list of all files in the cloned repository (excluding `.git`), allowing the frontend to build a file tree.
 
-Response:
-{
-  "session_id": "sess_abc123",
-  "files": [
-    {"path": "src/auth.py", "size": 1234, "is_dir": false},
-    {"path": "tests/", "size": 0, "is_dir": true}
-  ]
-}
-```
+### 3. Read File Content
+**Endpoint**: `GET /files/{session_id}/{file_path}`
+**Description**: Stream the raw text content of a specific file. Securely sanitizes paths to prevent directory traversal attacks.
 
-### 3. Get File Content
-```bash
-GET /files/{session_id}/src/auth.py
-
-Response: (file content as text)
-```
-
-### 4. Cleanup
-```bash
-DELETE /cleanup/{session_id}
-
-Response:
-{
-  "session_id": "sess_abc123",
-  "status": "deleted"
-}
-```
+### 4. Cleanup Session
+**Endpoint**: `DELETE /cleanup/{session_id}`
+**Description**: Instantly removes the cloned repository and session data from the server.
 
 ---
 
-## 🚀 Local Development
+## 🛠 Local Development
+
+### Prerequisites
+- Python 3.9+
+- Git installed and available in regular system PATH
+
+### Setup
 
 ```bash
-# Install dependencies
+# 1. Create a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# Run server
+# 3. Run the server
+# Runs on http://0.0.0.0:8000 by default
 python main.py
-
-# Or with uvicorn
-uvicorn main:app --reload --port 8000
 ```
-
-Server runs on: http://localhost:8000  
-API docs: http://localhost:8000/docs
 
 ---
 
-## ☁️ Deploy to Google Cloud Run
+## ☁️ Deployment (Google Cloud Run)
 
-### 1. Build and Push Container
+This service is optimized for containerized deployment. A `Dockerfile` is included in the root of this directory.
 
-```bash
-# Set your project ID
-export PROJECT_ID=your-gcp-project-id
-
-# Build container
-gcloud builds submit --tag gcr.io/$PROJECT_ID/autodevops-git-service
-
-# Or with Docker
-docker build -t gcr.io/$PROJECT_ID/autodevops-git-service .
-docker push gcr.io/$PROJECT_ID/autodevops-git-service
-```
-
-### 2. Deploy to Cloud Run
+### Build & Deploy
 
 ```bash
-gcloud run deploy autodevops-git-service \
-  --image gcr.io/$PROJECT_ID/autodevops-git-service \
+# 1. Build the container
+gcloud builds submit --tag gcr.io/PROJECT_ID/git-service
+
+# 2. Deploy to Cloud Run
+gcloud run deploy git-service \
+  --image gcr.io/PROJECT_ID/git-service \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --memory 1Gi \
-  --timeout 300
+  --memory 1Gi
 ```
-
-### 3. Get Service URL
-
-```bash
-gcloud run services describe autodevops-git-service \
-  --platform managed \
-  --region us-central1 \
-  --format 'value(status.url)'
-```
-
----
-
-## 🧪 Testing
-
-```bash
-# Health check
-curl https://your-service-url.run.app/health
-
-# Clone a repo
-curl -X POST https://your-service-url.run.app/clone \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_url": "https://github.com/octocat/Hello-World.git",
-    "branch": "master"
-  }'
-
-# List files
-curl https://your-service-url.run.app/files/sess_abc123
-
-# Get file
-curl https://your-service-url.run.app/files/sess_abc123/README
-
-# Cleanup
-curl -X DELETE https://your-service-url.run.app/cleanup/sess_abc123
-```
-
----
 
 ## 🔒 Security Notes
-
-- ✅ Path traversal protection
-- ✅ Session isolation
-- ⚠️ CORS set to allow all origins (configure for production)
-- ⚠️ No authentication (add if needed)
-- ⚠️ Public repos only
-
----
-
-## 💰 Cloud Run Pricing
-
-**Free tier**: 2 million requests/month  
-**After free tier**: ~$0.40 per million requests
-
-**Example costs**:
-- 10,000 clones/month: **FREE**
-- 100,000 clones/month: **~$4**
-
----
-
-## 🎯 Frontend Integration
-
-```javascript
-// 1. Clone repository
-const cloneResponse = await fetch('https://your-service.run.app/clone', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    repo_url: 'https://github.com/user/repo.git',
-    branch: 'main'
-  })
-});
-
-const { session_id } = await cloneResponse.json();
-
-// 2. Get file list
-const filesResponse = await fetch(`https://your-service.run.app/files/${session_id}`);
-const { files } = await filesResponse.json();
-
-// 3. Read specific file
-const fileContent = await fetch(
-  `https://your-service.run.app/files/${session_id}/src/auth.py`
-);
-const code = await fileContent.text();
-
-// 4. Frontend does AI analysis here...
-
-// 5. Cleanup when done
-await fetch(`https://your-service.run.app/cleanup/${session_id}`, {
-  method: 'DELETE'
-});
-```
-
----
-
-## 📊 Monitoring
-
-View logs in Google Cloud Console:
-```bash
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=autodevops-git-service" --limit 50
-```
-
----
-
-## 🔧 Environment Variables
-
-- `PORT`: Server port (Cloud Run sets this automatically)
-
----
-
-## 📝 File Structure
-
-```
-backend-simple/
-├── main.py              # FastAPI application
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Container definition
-├── .dockerignore       # Docker ignore rules
-└── README.md           # This file
-```
-
----
-
-## ✨ Benefits
-
-- **Serverless**: No server management
-- **Auto-scaling**: Handles traffic spikes
-- **Pay-per-use**: Only pay when cloning
-- **Fast**: Cold start < 1 second
-- **Simple**: Only 200 lines of code
+- **Path Traversal Protection**: The `get_file` endpoint strictly validates that requested file paths resolve within the generated session directory.
+- **Session Isolation**: Each `POST /clone` request generates a unique cryptographically random UUID for the session.
+- **Auto Cleanup**: It is recommended to configure a lifecycle policy or Cloud Scheduler job to purge the `./repos` folder periodically to ensure no stale data remains if a client fails to call cleanup.
