@@ -55,6 +55,7 @@ export interface AgentState {
   generatedDiff?: CodeFix;
   reportSummary?: string;
   simulationId?: string;
+  sessionId?: string;
   issues?: Issue[];
   thoughtSignature?: string;
 }

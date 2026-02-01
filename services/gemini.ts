@@ -62,6 +62,14 @@ const extractText = (response: any): string => {
   return "";
 };
 
+const handleApiError = (e: any): never => {
+  const message = e?.message || "";
+  if (message.includes("429") || message.includes("RESOURCE_EXHAUSTED")) {
+    throw new Error("API Quota Exceeded (429): Please check your Gemini API billing and rate limits.");
+  }
+  throw e;
+};
+
 export const getAgentReasoning = async (context: string, thoughtSignature?: string) => {
   try {
     const response = await ai.models.generateContent({
@@ -71,6 +79,9 @@ export const getAgentReasoning = async (context: string, thoughtSignature?: stri
     });
     return extractText(response) || "Tracing global system state...";
   } catch (error) {
+    if (error instanceof Error && (error.message.includes("429") || error.message.includes("RESOURCE_EXHAUSTED"))) {
+      return "Critical: API Rate Limit Exceeded. Pausing reasoning cycle.";
+    }
     return "Executing reconciliation trace...";
   }
 };
@@ -167,7 +178,7 @@ export const auditCodebase = async (repoUrl: string, branch: string, fileTree: s
       issues: result.issues.map((i: any) => ({ ...i, status: 'pending' }))
     };
   } catch (e) {
-    console.error("Audit failure:", e);
+    handleApiError(e);
     return { techStack: "Manual Analysis Required", issues: [] };
   }
 };
@@ -238,6 +249,7 @@ export const generateFixStrategy = async (issue: Issue, codebaseContext: string,
     const text = extractText(response);
     return JSON.parse(text || '{}');
   } catch (e) {
+    handleApiError(e);
     throw e;
   }
 };

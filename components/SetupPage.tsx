@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Icons } from '../constants';
 import { predictStackFromUrl } from '../services/gemini';
-import git from 'isomorphic-git';
-import LightningFS from 'lightning-fs';
 
 interface SetupPageProps {
   onLaunch: (config: any) => void;
@@ -11,357 +10,276 @@ interface SetupPageProps {
   onLoadSession?: (session: any) => void;
 }
 
-const fs = new LightningFS('autodevops-fs');
-
-const http = {
-  async request({ url, method, headers, body }: any) {
-    // CORS proxy to handle browser-side cloning
-    const proxyUrl = `https://cors.isomorphic-git.org/?url=${encodeURIComponent(url)}`;
-    
-    try {
-      const res = await fetch(proxyUrl, { method, headers, body });
-      
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = await res.arrayBuffer();
-      const responseHeaders: { [key: string]: string } = {};
-      res.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-
-      const bodyIterator = (async function* () {
-        yield new Uint8Array(data);
-      })();
-
-      return {
-        url: res.url,
-        method,
-        headers: responseHeaders,
-        body: bodyIterator,
-        statusCode: res.status,
-        statusMessage: res.statusText,
-      };
-    } catch (e: any) {
-      console.error("Git Request Error:", e);
-      throw new Error(`Git Network Fault: ${e.message}. Ensure the repository is public and accessible via CORS.`);
-    }
-  }
-};
-
-const CircularProgress = ({ value, label }: { value: number; label: string }) => {
-  const radius = 30;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (value / 100) * circumference;
-
-  return (
-    <div className="flex flex-col items-center justify-center space-y-3 p-4">
-      <div className="relative w-20 h-20">
-        <svg className="w-full h-full transform -rotate-90">
-          <circle
-            cx="40"
-            cy="40"
-            r={radius}
-            stroke="currentColor"
-            strokeWidth="4"
-            fill="transparent"
-            className="text-[#3c4043]"
-          />
-          <circle
-            cx="40"
-            cy="40"
-            r={radius}
-            stroke="currentColor"
-            strokeWidth="4"
-            fill="transparent"
-            strokeDasharray={circumference}
-            style={{ strokeDashoffset: offset, transition: 'stroke-dashoffset 0.5s ease' }}
-            className="text-[#8ab4f8]"
-          />
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono font-bold text-white">
-          {Math.round(value)}%
-        </div>
-      </div>
-      <span className="text-[10px] font-black uppercase tracking-widest text-[#9aa0a6] text-center max-w-[120px]">{label}</span>
-    </div>
-  );
-};
+const BACKEND_API_URL = "https://git-service-1078683595470.us-central1.run.app";
 
 const SetupPage: React.FC<SetupPageProps> = ({ onLaunch, onBack, history = [], onLoadSession }) => {
   const [repo, setRepo] = useState('');
   const [branch, setBranch] = useState('main');
-  const [techStack, setTechStack] = useState('Auto (AI)');
+  const [techStack, setTechStack] = useState('Auto-Detect');
   
   const [prepStatus, setPrepStatus] = useState<'idle' | 'running' | 'complete' | 'failed'>('idle');
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('Standby');
+  const [currentStepInfo, setCurrentStepInfo] = useState('');
   const [preflightData, setPreflightData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const abortController = useRef<AbortController | null>(null);
-
-  const performPreflight = async (url: string, b: string) => {
-    if (!url || !url.includes('github.com')) return;
+  const performBackendIngestion = async (url: string, b: string) => {
+    if (!url.startsWith('http')) return;
     
     setPrepStatus('running');
-    setProgress(5);
-    setProgressLabel('Initializing FS');
+    setProgress(10);
+    setProgressLabel('Handshake');
+    setCurrentStepInfo('Contacting FastAPI Git Service...');
     setError(null);
-    
-    const dir = '/repo';
-    const pfs = fs.promises;
 
     try {
-      // Clear previous repo
-      try { await pfs.rmdir(dir, { recursive: true }); } catch (e) {}
-      await pfs.mkdir(dir);
-      
-      setProgress(15);
-      setProgressLabel('Cloning Repo');
-      
-      await git.clone({
-        fs,
-        http,
-        dir,
-        url,
-        ref: b,
-        singleBranch: true,
-        depth: 1,
-        onProgress: (p) => {
-          const percent = 15 + (p.loaded / (p.total || 1000000)) * 40;
-          setProgress(Math.min(55, percent));
-          if (p.phase) setProgressLabel(p.phase);
-        }
+      const cloneResponse = await fetch(`${BACKEND_API_URL}/clone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: url, branch: b })
       });
 
-      setProgress(60);
-      setProgressLabel('Scanning Files');
-      
-      const fileTree: string[] = [];
-      const walk = async (path: string) => {
-        const files = await pfs.readdir(path);
-        for (const file of files) {
-          if (file === '.git') continue;
-          const fullPath = `${path}/${file}`;
-          const stat = await pfs.lstat(fullPath);
-          if (stat.isDirectory()) {
-            await walk(fullPath);
-          } else {
-            fileTree.push(fullPath.replace('/repo/', ''));
-          }
-        }
-      };
-      await walk(dir);
+      if (!cloneResponse.ok) {
+        const errData = await cloneResponse.json();
+        throw new Error(errData.detail || "Cloud clone operation failed.");
+      }
 
-      setProgress(80);
-      setProgressLabel('AI Stack Analysis');
+      const cloneData = await cloneResponse.json();
+      const sid = cloneData.session_id;
+
+      setProgress(40);
+      setProgressLabel('Mapping');
+      setCurrentStepInfo('Cloning successful. Indexing file system...');
+
+      const filesResponse = await fetch(`${BACKEND_API_URL}/files/${sid}`);
+      if (!filesResponse.ok) throw new Error("Failed to index repository files.");
+      
+      const filesData = await filesResponse.json();
+      const fileTree = filesData.files.map((f: any) => f.path);
+
+      setProgress(60);
+      setProgressLabel('Extraction');
+      setCurrentStepInfo('Identifying manifest files...');
+
+      const manifestPatterns = ['package.json', 'README.md', 'requirements.txt', 'go.mod', 'pom.xml', 'src/App', 'src/index', 'index.ts', 'main.py'];
+      const targets = fileTree.filter((p: string) => 
+        manifestPatterns.some(pattern => p.toLowerCase().includes(pattern.toLowerCase()))
+      ).slice(0, 15);
+
+      let contextContent = "";
+      for (const filePath of targets) {
+        try {
+          const fileContentRes = await fetch(`${BACKEND_API_URL}/files/${sid}/${encodeURIComponent(filePath)}`);
+          if (fileContentRes.ok) {
+            const text = await fileContentRes.text();
+            contextContent += `\n--- FILE PATH: ${filePath} ---\n${text.substring(0, 4000)}\n`;
+          }
+        } catch (e) { console.warn(e); }
+      }
+
+      setProgress(90);
+      setProgressLabel('Reasoning');
       
       const prediction = await predictStackFromUrl(url, fileTree);
       if (prediction.language) setTechStack(prediction.language);
 
-      setProgress(90);
-      setProgressLabel('Finalizing Context');
+      // Fix: Include repoUrl and branch in the preflight data so App.tsx can save it to history correctly
+      setPreflightData({ 
+        fileTree, 
+        contextContent, 
+        techStack: prediction.language, 
+        sessionId: sid,
+        repoUrl: url,
+        branch: b
+      });
       
-      // Ingest high-value content
-      let contextContent = "";
-      const highValuePatterns = ['package.json', 'requirements.txt', 'go.mod', 'README.md', 'src/'];
-      const targetFiles = fileTree.filter(f => highValuePatterns.some(p => f.includes(p))).slice(0, 30);
-      
-      for (const file of targetFiles) {
-        try {
-          const content = await pfs.readFile(`${dir}/${file}`, 'utf8');
-          contextContent += `\n--- FILE PATH: ${file} ---\n${content.toString().substring(0, 4000)}\n`;
-        } catch (e) {}
-      }
-
-      setPreflightData({ fileTree, contextContent, techStack: prediction.language });
       setProgress(100);
-      setProgressLabel('Ready for Launch');
+      setProgressLabel('Ready');
       setPrepStatus('complete');
 
     } catch (e: any) {
-      console.error("Preflight failure:", e);
       setError(e.message);
       setPrepStatus('failed');
       setProgress(0);
-      setProgressLabel('Sync Fault');
     }
   };
 
   useEffect(() => {
-    const isRepoUrl = repo.trim().length > 15 && repo.includes('github.com/');
-    if (isRepoUrl) {
-      const timer = setTimeout(() => {
-        performPreflight(repo.trim(), branch.trim());
-      }, 800);
+    const isRepo = repo.trim().length > 15 && repo.includes('github.com/');
+    if (isRepo) {
+      const timer = setTimeout(() => performBackendIngestion(repo.trim(), branch.trim()), 800);
       return () => clearTimeout(timer);
     } else {
       setPrepStatus('idle');
-      setProgress(0);
-      setProgressLabel('Standby');
       setPreflightData(null);
     }
   }, [repo, branch]);
 
-  const handleLaunch = () => {
-    if (preflightData) {
-      onLaunch({
-        repoUrl: repo.trim(),
-        branch: branch.trim(),
-        maxAttempts: 5,
-        techStack: preflightData.techStack || techStack,
-        fileTree: preflightData.fileTree,
-        contextContent: preflightData.contextContent
-      });
-    }
-  };
-
-  const useDemoRepo = () => {
-    setRepo('https://github.com/google-labs/test-repo');
-    setBranch('main');
-  };
-
   return (
-    <div className="min-h-screen bg-[#131314] px-6 py-12 md:py-20 flex flex-col items-center">
-      <div className="w-full max-w-7xl">
-        <button 
-          onClick={onBack} 
-          className="inline-flex items-center gap-2 text-[#9aa0a6] hover:text-white mb-10 transition-colors group text-sm"
-        >
-          <span className="material-symbols-outlined text-lg">arrow_back</span> Back to Home
+    <div className="min-h-screen bg-[#131314] flex flex-col items-center justify-center p-6 font-google text-[#e3e3e3]">
+      
+      {/* Top Bar */}
+      <div className="w-full max-w-6xl flex justify-between items-center mb-8">
+        <button onClick={onBack} className="flex items-center gap-2 text-[#9aa0a6] hover:text-[#e3e3e3] transition-colors pl-2">
+          <span className="material-symbols-outlined">arrow_back</span>
+          <span className="text-sm font-medium">Back to Home</span>
         </button>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-8 items-start">
-          {/* Main Launch Agent Card */}
-          <div className="bg-[#1e1f20] rounded-[48px] p-10 md:p-14 border border-[#3c4043] shadow-2xl relative overflow-hidden">
-            <h2 className="text-4xl md:text-5xl font-google font-bold text-white mb-3">Launch Agent</h2>
-            <p className="text-[#9aa0a6] text-lg font-light mb-12">Configure the autonomous healing parameters.</p>
-            
-            <div className="space-y-10">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center px-1">
-                  <label className="text-[11px] font-bold text-[#9aa0a6] uppercase tracking-[0.2em]">Github Repository URL</label>
-                  <button 
-                    onClick={useDemoRepo}
-                    className="text-[10px] font-bold text-[#8ab4f8] bg-[#8ab4f8]/10 px-4 py-1.5 rounded-full border border-[#8ab4f8]/20 hover:bg-[#8ab4f8]/20 transition-all uppercase tracking-widest"
-                  >
-                    Use Demo Repo
-                  </button>
-                </div>
-                <input 
-                  type="text" 
-                  value={repo} 
-                  onChange={(e) => setRepo(e.target.value)} 
-                  className={`w-full bg-[#131314] border rounded-2xl px-6 py-5 text-white text-lg transition-all outline-none placeholder:text-[#3c4043] ${error ? 'border-red-500/50' : 'border-[#3c4043] focus:border-[#8ab4f8]'}`} 
-                  placeholder="https://github.com/google-labs/test-repo" 
-                />
-                {error && <p className="text-red-400 text-[10px] font-mono px-1">ERROR: {error}</p>}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-4">
-                  <label className="text-[11px] font-bold text-[#9aa0a6] uppercase tracking-[0.2em]">Stack Override</label>
-                  <select 
-                    value={techStack} 
-                    onChange={(e) => setTechStack(e.target.value)} 
-                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-6 py-5 text-white outline-none focus:border-[#8ab4f8] appearance-none"
-                  >
-                    <option value="Auto (AI)">Auto (AI)</option>
-                    <option value="Node.js/TypeScript">Node.js / TypeScript</option>
-                    <option value="Python">Python</option>
-                    <option value="Go">Go</option>
-                    <option value="Rust">Rust</option>
-                  </select>
-                </div>
-                <div className="space-y-4">
-                  <label className="text-[11px] font-bold text-[#9aa0a6] uppercase tracking-[0.2em]">Branch</label>
-                  <input 
-                    type="text" 
-                    value={branch} 
-                    onChange={(e) => setBranch(e.target.value)} 
-                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-6 py-5 text-white focus:border-[#8ab4f8] transition-all outline-none" 
-                    placeholder="main"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-4 flex items-center justify-between gap-6">
-                <div className="flex-1 flex items-center gap-6 bg-[#131314]/50 rounded-[32px] border border-[#3c4043] p-4">
-                   <CircularProgress value={progress} label={progressLabel} />
-                   <div className="flex-1 space-y-2">
-                     <p className="text-xs font-bold text-white uppercase tracking-wider">{prepStatus === 'complete' ? 'Sync Certified' : prepStatus === 'running' ? 'Active Analysis' : 'Sync Pending'}</p>
-                     <p className="text-[10px] text-[#5f6368] leading-tight">Autonomous agents are pre-scanning the codebase for initial context signatures.</p>
-                   </div>
-                </div>
-
-                <button 
-                  onClick={handleLaunch} 
-                  disabled={prepStatus !== 'complete'}
-                  className="px-10 py-8 bg-[#3c4043] hover:bg-[#4a4d50] disabled:opacity-20 disabled:cursor-not-allowed text-white rounded-full font-bold text-xl transition-all shadow-2xl flex items-center justify-center gap-3 active:scale-95 group"
-                >
-                  <span className="opacity-70 group-hover:opacity-100">Start Autonomous Cycle</span> 
-                  <Icons.Sparkle />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Recent Projects Sidebar */}
-          <div className="bg-[#1e1f20] rounded-[48px] p-10 border border-[#3c4043] flex flex-col h-full shadow-2xl overflow-hidden">
-            <h3 className="text-2xl font-google font-bold text-white mb-10 flex items-center gap-3">
-              <span className="material-symbols-outlined text-white">history</span> Recent Projects
-            </h3>
-            
-            <div className="space-y-6 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-              {history.length > 0 ? history.map((session) => (
-                <button 
-                  key={session.id} 
-                  onClick={() => onLoadSession?.(session)} 
-                  className="w-full p-6 bg-[#131314]/50 border border-[#3c4043] rounded-[32px] hover:border-[#8ab4f8]/60 transition-all group flex flex-col text-left gap-4"
-                >
-                  <div className="flex justify-between items-start w-full">
-                    <span className="text-[10px] font-black text-[#8ab4f8] uppercase tracking-[0.1em] max-w-[140px] truncate">
-                      {session.agentState?.techStack || 'Detecting...'}
-                    </span>
-                    <span className="text-[9px] text-[#5f6368] font-mono text-right">
-                      {new Date(session.createdAt?.seconds * 1000).toLocaleDateString()}<br/>
-                      {new Date(session.createdAt?.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  
-                  <p className="text-sm font-bold text-white truncate w-full group-hover:text-[#8ab4f8] transition-colors">
-                    {session.repoUrl?.split('/').slice(-2).join('/')}
-                  </p>
-
-                  <div className="space-y-2 mt-2">
-                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest">
-                      <div className="h-1 bg-[#81c995]/20 flex-1 rounded-full mr-4 relative overflow-hidden">
-                        <div className="absolute inset-y-0 left-0 bg-[#81c995] rounded-full" style={{ width: '99%' }}></div>
-                      </div>
-                      <span className="text-[#81c995]">99% STABLE</span>
-                    </div>
-                  </div>
-                </button>
-              )) : (
-                <div className="flex flex-col items-center justify-center py-20 opacity-20 text-center">
-                  <span className="material-symbols-outlined text-5xl mb-4">folder_open</span>
-                  <p className="text-sm">No persistent storage found.</p>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-10 pt-8 border-t border-[#3c4043] flex items-center justify-center">
-               <span className="text-[10px] font-black text-[#5f6368] uppercase tracking-[0.2em]">Persistent Storage Active</span>
-            </div>
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-[#81c995]"></span>
+          <span className="text-xs font-medium text-[#c4c7c5]">System Operational</span>
         </div>
       </div>
 
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 10px; }
-      `}</style>
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-6">
+        
+        {/* Main Configuration Card */}
+        <div className="bg-[#1e1f20] rounded-[28px] p-8 md:p-10 shadow-lg border border-[#2d2e30] flex flex-col h-full relative overflow-hidden order-1">
+          {/* Progress Bar Top */}
+          {prepStatus !== 'idle' && (
+            <div className="absolute top-0 left-0 w-full h-1 bg-[#2d2e30]">
+              <div 
+                className={`h-full transition-all duration-700 ease-out ${prepStatus === 'failed' ? 'bg-[#f28b82]' : 'bg-[#8ab4f8]'}`} 
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
+          )}
+
+          <div className="mb-8">
+            <h1 className="text-3xl font-medium text-[#e3e3e3] mb-2">New Session</h1>
+            <p className="text-[#9aa0a6] text-sm">Configure the target repository for autonomous analysis.</p>
+          </div>
+
+          <div className="space-y-6 flex-1">
+            {/* Repo Input */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-medium text-[#c4c7c5] ml-1">Repository URL</label>
+                <button 
+                  onClick={() => setRepo('https://github.com/google-labs/test-repo')}
+                  className="text-xs font-medium text-[#8ab4f8] hover:bg-[#8ab4f8]/10 px-3 py-1 rounded-full transition-colors"
+                >
+                  Load Demo
+                </button>
+              </div>
+              <div className="relative group">
+                <input 
+                  type="text" 
+                  value={repo} 
+                  onChange={(e) => setRepo(e.target.value)}
+                  className="w-full bg-[#2d2e30] border-b-2 border-[#444746] rounded-t-lg px-4 py-4 text-[#e3e3e3] text-base focus:border-[#8ab4f8] focus:bg-[#343537] outline-none transition-all placeholder:text-[#5f6368]"
+                  placeholder="github.com/username/repo"
+                />
+                <span className="absolute right-4 top-4 text-[#9aa0a6] material-symbols-outlined">link</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               {/* Branch Input */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-[#c4c7c5] ml-1">Branch</label>
+                <div className="relative group">
+                  <input 
+                    type="text" 
+                    value={branch} 
+                    onChange={(e) => setBranch(e.target.value)}
+                    className="w-full bg-[#2d2e30] border-b-2 border-[#444746] rounded-t-lg px-4 py-3 text-[#e3e3e3] text-sm focus:border-[#8ab4f8] focus:bg-[#343537] outline-none transition-all"
+                  />
+                  <span className="absolute right-4 top-3 text-[#9aa0a6] material-symbols-outlined text-lg">call_split</span>
+                </div>
+              </div>
+
+               {/* Tech Stack Input */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-[#c4c7c5] ml-1">Environment</label>
+                <div className="relative group">
+                  <input 
+                    type="text" 
+                    value={techStack} 
+                    onChange={(e) => setTechStack(e.target.value)}
+                    className="w-full bg-[#2d2e30] border-b-2 border-[#444746] rounded-t-lg px-4 py-3 text-[#e3e3e3] text-sm focus:border-[#8ab4f8] focus:bg-[#343537] outline-none transition-all"
+                  />
+                  {prepStatus === 'complete' && <span className="absolute right-4 top-3 text-[#81c995] material-symbols-outlined text-lg">check_circle</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* Status Card */}
+            <div className={`mt-6 p-4 rounded-xl border transition-all duration-300 ${prepStatus === 'failed' ? 'bg-[#f28b82]/5 border-[#f28b82]/20' : 'bg-[#131314] border-[#3c4043]'}`}>
+               <div className="flex items-center gap-3">
+                  {prepStatus === 'running' && <div className="w-4 h-4 border-2 border-[#8ab4f8] border-t-transparent rounded-full animate-spin"></div>}
+                  {prepStatus === 'complete' && <Icons.CheckCircle />}
+                  {prepStatus === 'failed' && <span className="material-symbols-outlined text-[#f28b82]">warning</span>}
+                  {prepStatus === 'idle' && <span className="material-symbols-outlined text-[#5f6368]">dns</span>}
+                  
+                  <div className="flex-1">
+                    <p className={`text-sm font-medium ${prepStatus === 'failed' ? 'text-[#f28b82]' : 'text-[#e3e3e3]'}`}>
+                       {error ? 'Connection Failed' : prepStatus === 'idle' ? 'Ready to Connect' : currentStepInfo}
+                    </p>
+                    {error && <p className="text-xs text-[#f28b82]/80 mt-1">{error}</p>}
+                  </div>
+               </div>
+            </div>
+
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-[#3c4043] flex justify-end">
+            <button 
+              disabled={prepStatus !== 'complete'}
+              onClick={() => preflightData && onLaunch(preflightData)}
+              className="px-8 py-3 bg-[#8ab4f8] text-[#1e1f20] rounded-full font-medium text-sm hover:bg-[#a6c1ee] disabled:bg-[#3c4043] disabled:text-[#757779] transition-all shadow-md active:shadow-none"
+            >
+              Start Agent
+            </button>
+          </div>
+        </div>
+
+        {/* Sidebar History */}
+        <div className="bg-[#1e1f20] rounded-[28px] p-8 shadow-lg border border-[#2d2e30] flex flex-col h-full order-2">
+          <div className="flex items-center gap-3 mb-6">
+            <span className="material-symbols-outlined text-[#9aa0a6]">history</span>
+            <h2 className="text-lg font-medium text-[#e3e3e3]">Recent Activity</h2>
+          </div>
+
+          <div className="space-y-3 overflow-y-auto pr-1 flex-1">
+            {history.length > 0 ? history.map((session) => {
+              const repoName = session.repoUrl 
+                ? session.repoUrl.replace(/^https?:\/\//, '').split('/').slice(1).join('/')
+                : 'Unknown Repo';
+
+              return (
+                <button 
+                  key={session.id} 
+                  onClick={() => onLoadSession?.(session)} 
+                  className="w-full text-left p-4 rounded-2xl hover:bg-[#2d2e30] transition-colors group border border-transparent hover:border-[#3c4043]"
+                >
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-sm font-medium text-[#e3e3e3] truncate max-w-[150px]">
+                      {repoName}
+                    </span>
+                    <span className="text-xs text-[#9aa0a6]">
+                      {session.createdAt?.seconds 
+                        ? new Date(session.createdAt.seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                        : 'Just now'
+                      }
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                     <span className="w-1.5 h-1.5 rounded-full bg-[#81c995]"></span>
+                     <span className="text-xs text-[#c4c7c5]">{session.agentState?.techStack || 'Detected'}</span>
+                  </div>
+                </button>
+              );
+            }) : (
+              <div className="flex flex-col items-center justify-center h-48 opacity-40">
+                <span className="material-symbols-outlined text-4xl text-[#5f6368] mb-2">folder_open</span>
+                <p className="text-sm text-[#9aa0a6]">No recent sessions</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 };

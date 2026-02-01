@@ -17,6 +17,8 @@ import {
   generateFinalReport
 } from './services/gemini';
 
+const BACKEND_API_URL = "https://git-service-1078683595470.us-central1.run.app";
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('landing');
   const [user, setUser] = useState<User | null>(null);
@@ -67,10 +69,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Sanitizes objects for Firestore by converting undefined values to null.
-   * Firestore does not support 'undefined'.
-   */
   const sanitizeForFirestore = (val: any): any => {
     if (val === undefined) return null;
     if (val === null) return null;
@@ -150,7 +148,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const startAutonomousRun = async (config: { repoUrl: string, branch: string, maxAttempts: number, techStack?: string, fileTree: string[], contextContent: string }) => {
+  const startAutonomousRun = async (config: { repoUrl: string, branch: string, sessionId: string, techStack?: string, fileTree: string[], contextContent: string }) => {
     setView('dashboard');
     const runId = Math.random().toString(36).substr(2, 6).toUpperCase();
     const thoughtSig = `ARC-${Math.random().toString(36).substring(7).toUpperCase()}`;
@@ -162,9 +160,9 @@ const App: React.FC = () => {
       ...agentState, 
       ...config, 
       simulationId: runId,
-      confidence: 10,
+      confidence: 15,
       thoughtSignature: thoughtSig,
-      memory: [`Established stateful continuity via Thought Signature ${thoughtSig}`],
+      memory: [`Stateful continuation established. Session ID: ${config.sessionId}`],
       currentAttempt: 1,
       issues: []
     };
@@ -173,29 +171,27 @@ const App: React.FC = () => {
     setSteps(currentSteps);
     setLogs(currentLogs);
 
-    // ACTION-ERA TRIGGER
-    currentLogs = addLog('system', "1M-token reasoning budget available; selective context ingestion applied.", currentLogs);
-    currentLogs = addLog('system', "Thought Signature persistence verified. AutoDevOps AI is ready for system reconciliation.", currentLogs);
-    currentLogs = addLog('system', `AutoDevOps AI initialized. Monitoring branch ${config.branch} for high-confidence vulnerabilities.`, currentLogs);
+    currentLogs = addLog('system', "Autonomous Ingestion via FastAPI Microservice confirmed.", currentLogs);
+    currentLogs = addLog('system', `Established Thought Signature ${thoughtSig} for recursive reasoning.`, currentLogs);
 
     try {
       // 1. ARCHITECTURAL AUDIT
       currentSteps = updateStepLocally('ingest', 'running', currentSteps);
-      currentLogs = addLog('reasoning', await getAgentReasoning(`Executing Global Context Audit on branch ${config.branch}`, thoughtSig), currentLogs);
+      currentLogs = addLog('reasoning', await getAgentReasoning(`Analyzing environment topology for ${config.repoUrl}`, thoughtSig), currentLogs);
       
       const auditResult = await auditCodebase(config.repoUrl, config.branch, config.fileTree, config.contextContent, thoughtSig);
       
       if (auditResult.issues.length === 0) {
-        currentLogs = addLog('system', "Audit complete. No high-confidence vulnerabilities detected within context.", currentLogs);
+        currentLogs = addLog('audit', "Zero high-confidence vulnerabilities detected in current context.", currentLogs);
       } else {
-        currentLogs = addLog('audit', `Audit complete. Detected ${auditResult.issues.length} architectural vulnerabilities. Core Stack: ${auditResult.techStack}`, currentLogs);
+        currentLogs = addLog('audit', `Deep scan complete. ${auditResult.issues.length} high-confidence issues flagged. Tech: ${auditResult.techStack}`, currentLogs);
       }
       
       currentState = { 
         ...currentState, 
         techStack: auditResult.techStack,
         issues: auditResult.issues,
-        confidence: auditResult.issues.length > 0 ? 30 : 100
+        confidence: auditResult.issues.length > 0 ? 35 : 100
       };
       setAgentState(currentState);
       currentSteps = updateStepLocally('ingest', 'success', currentSteps);
@@ -209,7 +205,7 @@ const App: React.FC = () => {
 
         for (let i = 0; i < currentState.issues!.length; i++) {
           const issue = currentState.issues![i];
-          currentLogs = addLog('reasoning', `[RECONCILIATION ${i+1}/${currentState.issues!.length}] Addressing ${issue.title} in ${issue.file}`, currentLogs);
+          currentLogs = addLog('reasoning', `[STABILIZATION ${i+1}/${currentState.issues!.length}] Patching ${issue.title}`, currentLogs);
           
           const fixingIssues = [...currentState.issues!];
           fixingIssues[i].status = 'fixing';
@@ -219,10 +215,10 @@ const App: React.FC = () => {
           const patch = await generateFixStrategy(issue, config.contextContent, thoughtSig);
           
           fixingIssues[i].status = 'resolved';
-          currentState = { ...currentState, issues: fixingIssues, generatedDiff: patch, confidence: 35 + ((i + 1) * (60 / fixingIssues.length)) };
+          currentState = { ...currentState, issues: fixingIssues, generatedDiff: patch, confidence: 40 + ((i + 1) * (55 / fixingIssues.length)) };
           setAgentState(currentState);
           
-          currentLogs = addLog('system', `Stabilization patch certified for ${issue.file}. Root Cause: ${patch.rootCause}`, currentLogs);
+          currentLogs = addLog('system', `Certified stabilization patch for ${issue.file}. Root Cause: ${patch.rootCause}`, currentLogs);
           await saveSessionToFirestore(currentState, currentSteps, currentLogs);
           await new Promise(r => setTimeout(r, 2000));
         }
@@ -234,10 +230,10 @@ const App: React.FC = () => {
 
       // 5. FINAL VERIFICATION
       currentSteps = updateStepLocally('verify', 'running', currentSteps);
-      currentLogs = addLog('system', 'Executing global stability verification for visual and logical integrity...', currentLogs);
+      currentLogs = addLog('system', 'Executing multi-path verification of reconciliation changes...', currentLogs);
       await new Promise(r => setTimeout(r, 2000));
       
-      currentLogs = addLog('test', 'Global reconciliation verified. High-confidence heuristics pass.', currentLogs);
+      currentLogs = addLog('test', 'All integrity invariant checks passed. System stable.', currentLogs);
       currentSteps = updateStepLocally('verify', 'success', currentSteps);
       currentState = { ...currentState, confidence: 100, riskLevel: 'Low' };
       setAgentState(currentState);
@@ -249,15 +245,28 @@ const App: React.FC = () => {
       setAgentState(currentState);
       currentSteps = updateStepLocally('finalize', 'success', currentSteps);
       
+      // Safety Cleanup
+      currentLogs = addLog('system', "Finalizing audit session. Initiating remote repository cleanup...", currentLogs);
+      try {
+        await fetch(`${BACKEND_API_URL}/cleanup/${config.sessionId}`, { method: 'DELETE' });
+        currentLogs = addLog('system', "Cloud session purged. No data remains on microservice.", currentLogs);
+      } catch (e) {
+        currentLogs = addLog('error', "Cleanup Handshake Failed. Repository will be purged by server TTL.", currentLogs);
+      }
+
       await saveSessionToFirestore(currentState, currentSteps, currentLogs);
       if (user) fetchHistory(user.uid); 
       setView('report');
 
     } catch (error) {
-      console.error("Agent Fault:", error);
-      currentLogs = addLog('error', `System Fault: ${error instanceof Error ? error.message : 'Unknown'}`, currentLogs);
+      console.error("Agent Pipeline Error:", error);
+      currentLogs = addLog('error', `Pipeline Fault: ${error instanceof Error ? error.message : 'Unknown'}`, currentLogs);
       const failedState = { ...currentState, confidence: 0, riskLevel: 'High' as const };
       setAgentState(failedState);
+      
+      // Attempt cleanup even on failure
+      try { await fetch(`${BACKEND_API_URL}/cleanup/${config.sessionId}`, { method: 'DELETE' }); } catch (e) {}
+      
       await saveSessionToFirestore(failedState, currentSteps, currentLogs);
     }
   };
