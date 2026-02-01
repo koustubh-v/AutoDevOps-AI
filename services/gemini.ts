@@ -1,220 +1,211 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { CodeFix } from "../types";
+import { CodeFix, Issue } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const MODEL_FAST = 'gemini-3-flash-preview';
 const MODEL_REASONING = 'gemini-3-pro-preview';
 
-const SYSTEM_PROMPT = `You are an Autonomous DevOps Agent "AutoDevOps" powered by Gemini 3.
-Your goal is to fix build/test failures in a repository autonomously.
-You have access to:
-- Test failure logs
-- Repository file structure and content (provided in context)
-- History of previous attempts
+const SYSTEM_PROMPT = `ROLE: GLOBAL CONTEXT ARCHITECT (SRE-LEVEL AUTONOMOUS AGENT)
+You are AutoDevOps AI — an autonomous Site Reliability and DevOps reasoning system powered by Gemini 3.
 
-Internal reasoning process:
-1. Acknowledge the failure.
-2. Analyze the root cause based on logs and code.
-3. Formulate a fix strategy.
-4. Verify if the strategy is safe (no major refactors, no breaking changes).
-5. Generate the code patch.
-`;
+MISSION: AUTONOMOUS SYSTEM STABILIZATION
+- Identify high-confidence bugs, security risks, and architectural weaknesses present in the provided context.
+- Diagnose root causes, not just symptoms.
+- Assess impact radius across the codebase.
+- Propose minimal, stable, and verifiable fixes.
+- Explicitly recognize and respect system safety boundaries.
 
-const ANALYSIS_PROMPT_TEMPLATE = (logs: string, memory: string) => `
-SECTION: FAILURE LOGS
-${logs}
+ARCHITECTURAL REASONING PRINCIPLES:
+1. Selective Context Ingestion: Reason about what matters most. A large context window does NOT imply all files are equally relevant.
+2. Global Dependency Awareness: Trace imports, data flow, and API boundaries. Identify mismatches across modules.
+3. Stateful Reasoning: Maintain Thought Signatures and persistent reasoning state across attempts. Adapt based on prior failures.
+4. Engineering Realism: Do not overclaim certainty. If something cannot be concluded from context, say so.
 
-SECTION: PREVIOUS ATTEMPTS HISTORY
-${memory}
+ZERO-HALLUCINATION GUARDRAIL (HARD RULE):
+If a referenced file or module is not explicitly present in FILE TREE or CODE CONTEXT, it DOES NOT EXIST. Return the literal token: FILE_OUT_OF_CONTEXT. Do not guess.
 
-INSTRUCTIONS:
-Analyze the above correct failure.
-Output a JSON object with the following schema:
-{
-  "root_cause": "Brief explanation of what broke",
-  "proposed_fix": "Technical description of the fix",
-  "risk_level": "LOW|MEDIUM|HIGH|CRITICAL",
-  "reasoning": "Why this fix is chosen and why it is safe",
-  "files_to_change": ["path/to/file1", "path/to/file2"],
-  "strategy": "Description of the strategy"
-}
-`;
+SAFETY & SCOPE CONSTRAINTS:
+- No auth redesigns, schema migrations, or major dependency upgrades.
+- Favor minimal, reversible, low-blast-radius changes.
+- Accountability: Be ready to explain stops, fixes, and unresolved risks.
 
-const PATCH_PROMPT_TEMPLATE = (diagnosisJson: string, criticalFile: string) => `
-SECTION: CONTEXT
-We have identified the following issue:
-${diagnosisJson}
+OUTPUT REQUIREMENTS:
+- Root Cause Narrative (Max 2 sentences, technical, causal)
+- Impact Radius (List of files/modules affected)
+- Stabilization Blueprint (Precise minimal side-by-side diff)
+- Verification Strategy (Unit tests, regression coverage, or invariant checks)`;
 
-INSTRUCTIONS:
-Generate a patch to apply the fix for the file: ${criticalFile}.
-Output a JSON object representing the change for side-by-side display:
-{
-  "filePath": "${criticalFile}",
-  "explanation": "One sentence technical explanation of the fix.",
-  "before": [{"type": "neutral" | "removed", "content": "code line", "lineNumber": number}],
-  "after": [{"type": "neutral" | "added", "content": "code line", "lineNumber": number}]
-}
-Include context lines around changes (at least 2 lines before and after). Ensure line numbers are accurate.
-`;
+/**
+ * Extracts clean text from the response, handling multi-part content (like thinking tokens) 
+ * to avoid SDK warnings and ensure only final text output is returned.
+ */
+const extractText = (response: any): string => {
+  if (!response) return "";
+  
+  // Directly access the text property as per guidelines
+  try {
+    const textValue = response.text;
+    if (textValue) return textValue;
+  } catch (e) {
+    // Fallback if .text getter fails due to unexpected part types
+  }
 
-export const getAgentReasoning = async (context: string) => {
+  // Deep fallback for manual part extraction
+  if (response.candidates?.[0]?.content?.parts) {
+    return response.candidates[0].content.parts
+      .filter((part: any) => part.text)
+      .map((part: any) => part.text)
+      .join("");
+  }
+  
+  return "";
+};
+
+export const getAgentReasoning = async (context: string, thoughtSignature?: string) => {
   try {
     const response = await ai.models.generateContent({
       model: MODEL_FAST,
-      contents: `Generate a concise technical reasoning log entry (under 15 words) for: ${context}.`,
+      contents: `[TSIG: ${thoughtSignature || 'INIT'}] ACTION-ERA REASONING: ${context}. Output a professional SRE-grade reasoning log entry.`,
       config: { systemInstruction: SYSTEM_PROMPT }
     });
-    return response.text || "Analyzing system state...";
+    return extractText(response) || "Tracing global system state...";
   } catch (error) {
-    return "Processing logic stream...";
+    return "Executing reconciliation trace...";
   }
 };
 
-/**
- * Enhanced stack prediction using actual file lists and manifest contents.
- */
-export const predictStackFromUrl = async (url: string, rootFiles: string[] = [], manifestContent: string = "") => {
+export const predictStackFromUrl = async (repoUrl: string, fileTree: string[]) => {
   try {
-    const prompt = `Task: Identify the tech stack of this GitHub repository.
-URL: "${url}"
-ROOT FILES FOUND: [${rootFiles.join(', ')}]
-MANIFEST CONTENT (Partial): 
-${manifestContent.substring(0, 1000)}
-
-Instructions:
-1. Look for extension patterns (e.g., .py files mean Python).
-2. Check manifest for frameworks (e.g., "flask" in requirements.txt or "next" in package.json).
-3. Return ONLY valid JSON.
-4. "language" MUST be exactly one of: "Python", "Node.js", "Go", "Rust", "Java".
-
-JSON Schema:
-{ "language": string, "framework": string, "version": string, "engine": string }`;
+    const prompt = `Perform high-fidelity stack analysis for: ${repoUrl}.
+    FILE TREE SNAPSHOT: ${fileTree.slice(0, 100).join(', ')}
+    
+    Instructions:
+    - Analyze manifests and extensions.
+    - Engineering Realism: Do not guess.
+    
+    Return JSON: { "language": string, "framework": string, "confidence": number }`;
 
     const response = await ai.models.generateContent({
-      model: MODEL_REASONING, 
+      model: MODEL_FAST,
       contents: prompt,
-      config: { 
-        systemInstruction: "You are a software architect that analyzes repository structures. Use the provided file list to be 100% accurate.",
+      config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             language: { type: Type.STRING },
             framework: { type: Type.STRING },
-            version: { type: Type.STRING },
-            engine: { type: Type.STRING }
+            confidence: { type: Type.NUMBER }
           },
-          required: ["language", "framework", "version", "engine"]
+          required: ["language", "framework", "confidence"]
         }
       }
     });
-    return JSON.parse(response.text || '{}');
+    const text = extractText(response);
+    return JSON.parse(text || '{}');
   } catch (e) {
-    console.error("Prediction error:", e);
-    // Simple heuristic fallback if AI fails
-    if (rootFiles.some(f => f.endsWith('.py'))) return { language: "Python", framework: "Unknown", version: "3.x", engine: "Pytest" };
-    return { language: "Node.js", framework: "Generic", version: "LTS", engine: "Jest" };
+    return { language: "Undetermined", framework: "Analyzing", confidence: 0 };
   }
 };
 
-export const analyzeRepoContext = async (repoUrl: string, stackHint?: string) => {
+export const auditCodebase = async (repoUrl: string, branch: string, fileTree: string[], codebaseContext: string, thoughtSignature: string): Promise<{ techStack: string, issues: Issue[] }> => {
   try {
-    const prompt = `Analyze the GitHub repository URL "${repoUrl}". ${stackHint ? `The user indicated this is a ${stackHint} project.` : ''} 
-    Determine the most likely tech stack and a critical file that would contain a complex bug.
-    Return JSON: { "techStack": string, "criticalFile": string }`;
+    const prompt = `
+    ACTION-ERA DEEP AUDIT: ${repoUrl} @ branch "${branch}"
+    TSIG: ${thoughtSignature}
+    
+    1M-token reasoning budget available; selective context ingestion applied.
+    
+    FILE TREE:
+    ${fileTree.slice(0, 300).join('\n')}
+    
+    CODE SAMPLES & MANIFESTS:
+    ${codebaseContext}
+
+    TASK:
+    1. Perform a total codebase reconciliation on this specific branch context.
+    2. Identify high-confidence bugs, security vulnerabilities, and architectural weaknesses present in the provided context.
+    3. Detect techStack strictly from provided data.
+    4. Return valid JSON.
+    `;
 
     const response = await ai.models.generateContent({
       model: MODEL_REASONING,
       contents: prompt,
-      config: { 
+      config: {
         systemInstruction: SYSTEM_PROMPT,
         responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 15000 },
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             techStack: { type: Type.STRING },
-            criticalFile: { type: Type.STRING }
+            issues: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                  severity: { type: Type.STRING, enum: ["Critical", "Major", "Minor"] },
+                  file: { type: Type.STRING },
+                  description: { type: Type.STRING }
+                },
+                required: ["id", "title", "severity", "file", "description"]
+              }
+            }
           },
-          required: ["techStack", "criticalFile"]
+          required: ["techStack", "issues"]
         }
       }
     });
-    const result = JSON.parse(response.text || '{}');
+    const text = extractText(response);
+    const result = JSON.parse(text || '{"techStack": "Unknown", "issues": []}');
     return {
-      techStack: result.techStack || stackHint || "Python/FastAPI",
-      criticalFile: result.criticalFile || (stackHint?.toLowerCase().includes('python') ? "main.py" : "index.ts")
+      techStack: result.techStack,
+      issues: result.issues.map((i: any) => ({ ...i, status: 'pending' }))
     };
   } catch (e) {
-    return { techStack: stackHint || "Python/Django", criticalFile: "app/views.py" };
+    console.error("Audit failure:", e);
+    return { techStack: "Manual Analysis Required", issues: [] };
   }
 };
 
-export const generateTestFailure = async (techStack: string, criticalFile: string) => {
+export const generateFixStrategy = async (issue: Issue, codebaseContext: string, thoughtSignature: string): Promise<CodeFix> => {
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL_FAST,
-      contents: `Generate a realistic failure log for a ${techStack} project at ${criticalFile}. Return only the log text.`,
-      config: { systemInstruction: SYSTEM_PROMPT }
-    });
-    return response.text || "RuntimeError: Circular dependency detected in module resolution.";
-  } catch (e) {
-    return "Process terminated with exit code 1. Stack trace unavailable.";
-  }
-};
+    const prompt = `
+    STABILIZATION REQUEST: Fix Issue [${issue.id}]
+    TSIG: ${thoughtSignature}
+    TITLE: ${issue.title}
+    TARGET FILE: ${issue.file}
+    DESCRIPTION: ${issue.description}
+    
+    CODEBASE CONTEXT:
+    ${codebaseContext}
 
-export const diagnoseFailure = async (logs: string, memory: string[]) => {
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL_REASONING,
-      contents: ANALYSIS_PROMPT_TEMPLATE(logs, memory.join('\n')),
-      config: { 
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 4000 },
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            root_cause: { type: Type.STRING },
-            proposed_fix: { type: Type.STRING },
-            risk_level: { type: Type.STRING },
-            reasoning: { type: Type.STRING },
-            files_to_change: { type: Type.ARRAY, items: { type: Type.STRING } },
-            strategy: { type: Type.STRING }
-          },
-          required: ["root_cause", "proposed_fix", "risk_level", "reasoning", "files_to_change", "strategy"]
-        }
-      }
-    });
-    return JSON.parse(response.text || '{}');
-  } catch (e) {
-    console.error("Diagnosis Error:", e);
-    return { 
-      root_cause: "Unknown internal error during analysis", 
-      risk_level: "MEDIUM", 
-      proposed_fix: "Apply standard safety guards",
-      reasoning: "Automated fallback due to analysis timeout or error.",
-      files_to_change: [],
-      strategy: "Conservative fix"
-    };
-  }
-};
+    Generate a stabilization blueprint including:
+    - Root Cause Narrative (Max 2 sentences)
+    - Impact Radius
+    - side-by-side minimal diff
+    - Verification Strategy
+    `;
 
-export const generateFixStrategy = async (diagnosis: any, criticalFile: string): Promise<CodeFix> => {
-  try {
     const response = await ai.models.generateContent({
       model: MODEL_REASONING,
-      contents: PATCH_PROMPT_TEMPLATE(JSON.stringify(diagnosis), criticalFile),
-      config: { 
+      contents: prompt,
+      config: {
         systemInstruction: SYSTEM_PROMPT,
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 4000 },
+        thinkingConfig: { thinkingBudget: 8000 },
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             filePath: { type: Type.STRING },
             explanation: { type: Type.STRING },
+            rootCause: { type: Type.STRING },
+            impactRadius: { type: Type.ARRAY, items: { type: Type.STRING } },
+            verificationStrategy: { type: Type.STRING },
             before: {
               type: Type.ARRAY,
               items: {
@@ -240,33 +231,29 @@ export const generateFixStrategy = async (diagnosis: any, criticalFile: string):
               }
             }
           },
-          required: ["filePath", "explanation", "before", "after"]
+          required: ["filePath", "explanation", "rootCause", "impactRadius", "verificationStrategy", "before", "after"]
         }
       }
     });
-    const parsed = JSON.parse(response.text || 'null');
-    if (!parsed) throw new Error("Null response from model during patch generation.");
-    return parsed;
+    const text = extractText(response);
+    return JSON.parse(text || '{}');
   } catch (e) {
-    console.error("Fix Generation Error:", e);
-    return {
-      filePath: criticalFile,
-      explanation: "Applied safety guards to the logic to prevent runtime failures.",
-      before: [{ type: 'neutral', content: '// Original implementation', lineNumber: 10 }],
-      after: [{ type: 'added', content: '// Patched by AutoDevOps AI', lineNumber: 10 }]
-    };
+    throw e;
   }
 };
 
-export const generateFinalReport = async (agentState: any) => {
+export const generateFinalReport = async (state: any) => {
   try {
     const response = await ai.models.generateContent({
       model: MODEL_FAST,
-      contents: `Generate a short executive summary for fixing ${agentState.detectedError} in ${agentState.techStack}.`,
+      contents: `Generate executive post-mortem for ${state.repoUrl}. 
+      Thought Signature: ${state.thoughtSignature}. 
+      Reconciled ${state.issues?.length} issues. 
+      Mention fixed, not fixed, and remaining risks.`,
       config: { systemInstruction: SYSTEM_PROMPT }
     });
-    return response.text || "Autonomous run completed. System health confirmed.";
+    return extractText(response) || "System stabilized. Global trace verified.";
   } catch (e) {
-    return "Autonomous run completed. System health confirmed.";
+    return "Finalization report fault.";
   }
 };

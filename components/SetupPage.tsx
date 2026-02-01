@@ -1,7 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from '../constants';
 import { predictStackFromUrl } from '../services/gemini';
+import git from 'isomorphic-git';
+import LightningFS from 'lightning-fs';
 
 interface SetupPageProps {
   onLaunch: (config: any) => void;
@@ -10,270 +11,357 @@ interface SetupPageProps {
   onLoadSession?: (session: any) => void;
 }
 
-interface DetectedInfo {
-  language: string;
-  framework: string;
-  version: string;
-  engine: string;
-  loading: boolean;
-  status: string;
-}
+const fs = new LightningFS('autodevops-fs');
+
+const http = {
+  async request({ url, method, headers, body }: any) {
+    // CORS proxy to handle browser-side cloning
+    const proxyUrl = `https://cors.isomorphic-git.org/?url=${encodeURIComponent(url)}`;
+    
+    try {
+      const res = await fetch(proxyUrl, { method, headers, body });
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.arrayBuffer();
+      const responseHeaders: { [key: string]: string } = {};
+      res.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
+
+      const bodyIterator = (async function* () {
+        yield new Uint8Array(data);
+      })();
+
+      return {
+        url: res.url,
+        method,
+        headers: responseHeaders,
+        body: bodyIterator,
+        statusCode: res.status,
+        statusMessage: res.statusText,
+      };
+    } catch (e: any) {
+      console.error("Git Request Error:", e);
+      throw new Error(`Git Network Fault: ${e.message}. Ensure the repository is public and accessible via CORS.`);
+    }
+  }
+};
+
+const CircularProgress = ({ value, label }: { value: number; label: string }) => {
+  const radius = 30;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value / 100) * circumference;
+
+  return (
+    <div className="flex flex-col items-center justify-center space-y-3 p-4">
+      <div className="relative w-20 h-20">
+        <svg className="w-full h-full transform -rotate-90">
+          <circle
+            cx="40"
+            cy="40"
+            r={radius}
+            stroke="currentColor"
+            strokeWidth="4"
+            fill="transparent"
+            className="text-[#3c4043]"
+          />
+          <circle
+            cx="40"
+            cy="40"
+            r={radius}
+            stroke="currentColor"
+            strokeWidth="4"
+            fill="transparent"
+            strokeDasharray={circumference}
+            style={{ strokeDashoffset: offset, transition: 'stroke-dashoffset 0.5s ease' }}
+            className="text-[#8ab4f8]"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono font-bold text-white">
+          {Math.round(value)}%
+        </div>
+      </div>
+      <span className="text-[10px] font-black uppercase tracking-widest text-[#9aa0a6] text-center max-w-[120px]">{label}</span>
+    </div>
+  );
+};
 
 const SetupPage: React.FC<SetupPageProps> = ({ onLaunch, onBack, history = [], onLoadSession }) => {
   const [repo, setRepo] = useState('');
   const [branch, setBranch] = useState('main');
-  const [retries, setRetries] = useState(5);
-  const [techStack, setTechStack] = useState('Auto-Detect');
-  const [detection, setDetection] = useState<DetectedInfo | null>(null);
-  const lastAnalyzedUrl = useRef('');
+  const [techStack, setTechStack] = useState('Auto (AI)');
+  
+  const [prepStatus, setPrepStatus] = useState<'idle' | 'running' | 'complete' | 'failed'>('idle');
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('Standby');
+  const [preflightData, setPreflightData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const fillDemoRepo = () => {
-    setRepo('https://github.com/koustubh-v/Demo-Buggy-Repo');
-  };
+  const abortController = useRef<AbortController | null>(null);
 
-  const parseRepoUrl = (url: string) => {
+  const performPreflight = async (url: string, b: string) => {
+    if (!url || !url.includes('github.com')) return;
+    
+    setPrepStatus('running');
+    setProgress(5);
+    setProgressLabel('Initializing FS');
+    setError(null);
+    
+    const dir = '/repo';
+    const pfs = fs.promises;
+
     try {
-      const parts = url.replace('https://github.com/', '').split('/');
-      if (parts.length >= 2) {
-        return { owner: parts[0], repo: parts[1].replace('.git', '') };
-      }
-    } catch (e) { return null; }
-    return null;
-  };
-
-  const fetchRepoMetadata = async (url: string) => {
-    const parsed = parseRepoUrl(url);
-    if (!parsed) return null;
-
-    setDetection(prev => ({ ...prev!, status: 'Fetching repository file tree...' }));
-    try {
-      const response = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents`);
-      if (!response.ok) throw new Error('API Rate Limit or Invalid Repo');
-      const files = await response.json();
-      const fileNames = files.map((f: any) => f.name);
-
-      const manifests = ['package.json', 'requirements.txt', 'go.mod', 'Cargo.toml', 'pom.xml'];
-      const foundManifest = files.find((f: any) => manifests.includes(f.name));
+      // Clear previous repo
+      try { await pfs.rmdir(dir, { recursive: true }); } catch (e) {}
+      await pfs.mkdir(dir);
       
-      let manifestContent = "";
-      if (foundManifest) {
-        setDetection(prev => ({ ...prev!, status: `Inspecting ${foundManifest.name}...` }));
-        const mRes = await fetch(foundManifest.download_url);
-        manifestContent = await mRes.text();
+      setProgress(15);
+      setProgressLabel('Cloning Repo');
+      
+      await git.clone({
+        fs,
+        http,
+        dir,
+        url,
+        ref: b,
+        singleBranch: true,
+        depth: 1,
+        onProgress: (p) => {
+          const percent = 15 + (p.loaded / (p.total || 1000000)) * 40;
+          setProgress(Math.min(55, percent));
+          if (p.phase) setProgressLabel(p.phase);
+        }
+      });
+
+      setProgress(60);
+      setProgressLabel('Scanning Files');
+      
+      const fileTree: string[] = [];
+      const walk = async (path: string) => {
+        const files = await pfs.readdir(path);
+        for (const file of files) {
+          if (file === '.git') continue;
+          const fullPath = `${path}/${file}`;
+          const stat = await pfs.lstat(fullPath);
+          if (stat.isDirectory()) {
+            await walk(fullPath);
+          } else {
+            fileTree.push(fullPath.replace('/repo/', ''));
+          }
+        }
+      };
+      await walk(dir);
+
+      setProgress(80);
+      setProgressLabel('AI Stack Analysis');
+      
+      const prediction = await predictStackFromUrl(url, fileTree);
+      if (prediction.language) setTechStack(prediction.language);
+
+      setProgress(90);
+      setProgressLabel('Finalizing Context');
+      
+      // Ingest high-value content
+      let contextContent = "";
+      const highValuePatterns = ['package.json', 'requirements.txt', 'go.mod', 'README.md', 'src/'];
+      const targetFiles = fileTree.filter(f => highValuePatterns.some(p => f.includes(p))).slice(0, 30);
+      
+      for (const file of targetFiles) {
+        try {
+          const content = await pfs.readFile(`${dir}/${file}`, 'utf8');
+          contextContent += `\n--- FILE PATH: ${file} ---\n${content.toString().substring(0, 4000)}\n`;
+        } catch (e) {}
       }
 
-      return { fileNames, manifestContent };
-    } catch (e) {
-      console.warn("GitHub API failed, falling back to URL reasoning:", e);
-      return { fileNames: [], manifestContent: "" };
+      setPreflightData({ fileTree, contextContent, techStack: prediction.language });
+      setProgress(100);
+      setProgressLabel('Ready for Launch');
+      setPrepStatus('complete');
+
+    } catch (e: any) {
+      console.error("Preflight failure:", e);
+      setError(e.message);
+      setPrepStatus('failed');
+      setProgress(0);
+      setProgressLabel('Sync Fault');
     }
   };
 
   useEffect(() => {
-    const trimmedRepo = repo.trim();
-    if (trimmedRepo.length > 10 && trimmedRepo.startsWith('http') && trimmedRepo !== lastAnalyzedUrl.current) {
-      setDetection({ language: '', framework: '', version: '', engine: '', loading: true, status: 'Analyzing URL pattern...' });
-      
-      const triggerAnalysis = async () => {
-        try {
-          lastAnalyzedUrl.current = trimmedRepo;
-          const meta = await fetchRepoMetadata(trimmedRepo);
-          const result = await predictStackFromUrl(trimmedRepo, meta?.fileNames, meta?.manifestContent);
-          
-          setDetection({
-            language: result.language || 'Unknown',
-            framework: result.framework || 'Detecting...',
-            version: result.version || 'Latest',
-            engine: result.engine || 'Standard',
-            loading: false,
-            status: 'Analysis Complete'
-          });
-          
-          if (result.language) {
-            const langMap: Record<string, string> = {
-              'Python': 'Python',
-              'Node.js': 'Node.js',
-              'Nodejs': 'Node.js',
-              'TypeScript': 'Node.js',
-              'Go': 'Go',
-              'Rust': 'Rust',
-              'Java': 'Java'
-            };
-            const mapped = langMap[result.language] || result.language;
-            setTechStack(mapped);
-          }
-        } catch (error) {
-          console.error("Setup Analysis Error:", error);
-          setDetection(null);
-        }
-      };
-
-      const timer = setTimeout(triggerAnalysis, 800);
+    const isRepoUrl = repo.trim().length > 15 && repo.includes('github.com/');
+    if (isRepoUrl) {
+      const timer = setTimeout(() => {
+        performPreflight(repo.trim(), branch.trim());
+      }, 800);
       return () => clearTimeout(timer);
-    } else if (!trimmedRepo) {
-      setDetection(null);
-      lastAnalyzedUrl.current = '';
+    } else {
+      setPrepStatus('idle');
+      setProgress(0);
+      setProgressLabel('Standby');
+      setPreflightData(null);
     }
-  }, [repo]);
+  }, [repo, branch]);
+
+  const handleLaunch = () => {
+    if (preflightData) {
+      onLaunch({
+        repoUrl: repo.trim(),
+        branch: branch.trim(),
+        maxAttempts: 5,
+        techStack: preflightData.techStack || techStack,
+        fileTree: preflightData.fileTree,
+        contextContent: preflightData.contextContent
+      });
+    }
+  };
+
+  const useDemoRepo = () => {
+    setRepo('https://github.com/google-labs/test-repo');
+    setBranch('main');
+  };
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-12 md:py-20 min-h-screen flex flex-col">
-      <button 
-        onClick={onBack}
-        className="inline-flex items-center gap-2 text-[#9aa0a6] hover:text-white mb-10 transition-colors w-fit group"
-      >
-        <span className="material-symbols-outlined text-lg">arrow_back</span>
-        Back to Home
-      </button>
+    <div className="min-h-screen bg-[#131314] px-6 py-12 md:py-20 flex flex-col items-center">
+      <div className="w-full max-w-7xl">
+        <button 
+          onClick={onBack} 
+          className="inline-flex items-center gap-2 text-[#9aa0a6] hover:text-white mb-10 transition-colors group text-sm"
+        >
+          <span className="material-symbols-outlined text-lg">arrow_back</span> Back to Home
+        </button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
-        
-        {/* Configuration Section - 2 columns on lg */}
-        <div className="lg:col-span-2 flex flex-col">
-          <div className="glass-panel rounded-[32px] md:rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden flex-1 flex flex-col">
-            <div className="absolute -top-24 -right-24 w-64 h-64 bg-[#8ab4f8]/5 rounded-full blur-[80px] pointer-events-none"></div>
-
-            <div className="mb-10">
-              <h2 className="text-3xl md:text-4xl font-google font-bold text-white mb-4">Launch Agent</h2>
-              <p className="text-[#9aa0a6] font-light">Configure the autonomous healing parameters.</p>
-            </div>
-
-            <div className="space-y-8 flex-1">
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <label className="block text-[10px] font-bold text-[#e8eaed] uppercase tracking-wider opacity-60">GitHub Repository URL</label>
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-8 items-start">
+          {/* Main Launch Agent Card */}
+          <div className="bg-[#1e1f20] rounded-[48px] p-10 md:p-14 border border-[#3c4043] shadow-2xl relative overflow-hidden">
+            <h2 className="text-4xl md:text-5xl font-google font-bold text-white mb-3">Launch Agent</h2>
+            <p className="text-[#9aa0a6] text-lg font-light mb-12">Configure the autonomous healing parameters.</p>
+            
+            <div className="space-y-10">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center px-1">
+                  <label className="text-[11px] font-bold text-[#9aa0a6] uppercase tracking-[0.2em]">Github Repository URL</label>
                   <button 
-                    onClick={fillDemoRepo}
-                    className="px-4 py-1.5 border border-[#3c4043] rounded-full text-[11px] font-medium text-[#8ab4f8] hover:bg-[#3c4043]/30 transition-colors"
+                    onClick={useDemoRepo}
+                    className="text-[10px] font-bold text-[#8ab4f8] bg-[#8ab4f8]/10 px-4 py-1.5 rounded-full border border-[#8ab4f8]/20 hover:bg-[#8ab4f8]/20 transition-all uppercase tracking-widest"
                   >
                     Use Demo Repo
                   </button>
                 </div>
-                <div className="relative group">
-                  <input 
-                    type="text" 
-                    value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-5 py-4 text-white text-lg focus:border-[#8ab4f8] outline-none placeholder:text-[#3c4043] transition-all"
-                    placeholder="https://github.com/google-labs/test-repo"
-                  />
-                </div>
-                {detection && (
-                  <div className="mt-4 flex flex-col gap-2 p-4 rounded-2xl border border-[#8ab4f8]/20 bg-[#8ab4f8]/5 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-[#8ab4f8] uppercase tracking-widest">
-                      <Icons.Sparkle />
-                      {detection.loading ? detection.status : 'Auto-Detection Complete'}
-                    </div>
-                    {!detection.loading && (
-                       <div className="flex flex-wrap gap-y-2 gap-x-6 text-[10px] font-mono">
-                          <span>STK: <strong className="text-white">{detection.language}</strong></span>
-                          <span>FRM: <strong className="text-white">{detection.framework}</strong></span>
-                          <span>ENG: <strong className="text-white">{detection.engine}</strong></span>
-                       </div>
-                    )}
-                  </div>
-                )}
+                <input 
+                  type="text" 
+                  value={repo} 
+                  onChange={(e) => setRepo(e.target.value)} 
+                  className={`w-full bg-[#131314] border rounded-2xl px-6 py-5 text-white text-lg transition-all outline-none placeholder:text-[#3c4043] ${error ? 'border-red-500/50' : 'border-[#3c4043] focus:border-[#8ab4f8]'}`} 
+                  placeholder="https://github.com/google-labs/test-repo" 
+                />
+                {error && <p className="text-red-400 text-[10px] font-mono px-1">ERROR: {error}</p>}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  <label className="block text-[10px] font-bold text-[#e8eaed] uppercase tracking-wider opacity-60">Stack Override</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <label className="text-[11px] font-bold text-[#9aa0a6] uppercase tracking-[0.2em]">Stack Override</label>
                   <select 
-                    value={techStack}
-                    onChange={(e) => setTechStack(e.target.value)}
-                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-5 py-4 text-white outline-none appearance-none cursor-pointer focus:border-[#8ab4f8] transition-all"
+                    value={techStack} 
+                    onChange={(e) => setTechStack(e.target.value)} 
+                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-6 py-5 text-white outline-none focus:border-[#8ab4f8] appearance-none"
                   >
-                    <option value="Auto-Detect">Auto (AI)</option>
-                    <option value="Node.js">Node.js</option>
+                    <option value="Auto (AI)">Auto (AI)</option>
+                    <option value="Node.js/TypeScript">Node.js / TypeScript</option>
                     <option value="Python">Python</option>
                     <option value="Go">Go</option>
                     <option value="Rust">Rust</option>
                   </select>
                 </div>
-                <div className="space-y-3">
-                  <label className="block text-[10px] font-bold text-[#e8eaed] uppercase tracking-wider opacity-60">Branch</label>
+                <div className="space-y-4">
+                  <label className="text-[11px] font-bold text-[#9aa0a6] uppercase tracking-[0.2em]">Branch</label>
                   <input 
                     type="text" 
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-5 py-4 text-white outline-none focus:border-[#8ab4f8] transition-all"
+                    value={branch} 
+                    onChange={(e) => setBranch(e.target.value)} 
+                    className="w-full bg-[#131314] border border-[#3c4043] rounded-2xl px-6 py-5 text-white focus:border-[#8ab4f8] transition-all outline-none" 
+                    placeholder="main"
                   />
                 </div>
               </div>
 
-              <div className="pt-6 mt-auto">
+              <div className="pt-4 flex items-center justify-between gap-6">
+                <div className="flex-1 flex items-center gap-6 bg-[#131314]/50 rounded-[32px] border border-[#3c4043] p-4">
+                   <CircularProgress value={progress} label={progressLabel} />
+                   <div className="flex-1 space-y-2">
+                     <p className="text-xs font-bold text-white uppercase tracking-wider">{prepStatus === 'complete' ? 'Sync Certified' : prepStatus === 'running' ? 'Active Analysis' : 'Sync Pending'}</p>
+                     <p className="text-[10px] text-[#5f6368] leading-tight">Autonomous agents are pre-scanning the codebase for initial context signatures.</p>
+                   </div>
+                </div>
+
                 <button 
-                  onClick={() => onLaunch({ repoUrl: repo, branch, maxAttempts: retries, techStack: techStack === 'Auto-Detect' ? undefined : techStack })}
-                  disabled={!repo || (detection?.loading ?? false)}
-                  className="w-full py-5 bg-[#8ab4f8] hover:bg-[#a6c1ee] disabled:bg-[#3c4043] text-[#131314] rounded-full font-bold text-lg transition-all shadow-xl shadow-[#8ab4f8]/10 flex items-center justify-center gap-3 active:scale-[0.98]"
+                  onClick={handleLaunch} 
+                  disabled={prepStatus !== 'complete'}
+                  className="px-10 py-8 bg-[#3c4043] hover:bg-[#4a4d50] disabled:opacity-20 disabled:cursor-not-allowed text-white rounded-full font-bold text-xl transition-all shadow-2xl flex items-center justify-center gap-3 active:scale-95 group"
                 >
-                  Start Autonomous Cycle
+                  <span className="opacity-70 group-hover:opacity-100">Start Autonomous Cycle</span> 
                   <Icons.Sparkle />
                 </button>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* History Section - 1 column on lg */}
-        <div className="flex flex-col h-full">
-          <div className="glass-panel rounded-[32px] md:rounded-[40px] p-8 md:p-10 flex flex-col h-full min-h-[500px] md:min-h-0 overflow-hidden shadow-2xl">
-            <h3 className="text-xl md:text-2xl font-google font-bold text-white mb-8 flex items-center gap-3">
-              <Icons.History /> Recent Projects
+          {/* Recent Projects Sidebar */}
+          <div className="bg-[#1e1f20] rounded-[48px] p-10 border border-[#3c4043] flex flex-col h-full shadow-2xl overflow-hidden">
+            <h3 className="text-2xl font-google font-bold text-white mb-10 flex items-center gap-3">
+              <span className="material-symbols-outlined text-white">history</span> Recent Projects
             </h3>
-            <div className="space-y-4 overflow-y-auto no-scrollbar flex-1 pr-1">
-              {history.length > 0 ? (
-                history.map((session) => {
-                  const date = session.createdAt?.toDate?.() || new Date();
-                  const dateStr = date.toLocaleDateString();
-                  const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                  return (
-                    <button
-                      key={session.id}
-                      onClick={() => onLoadSession?.(session)}
-                      className="w-full text-left p-5 bg-[#1e1f20]/40 border border-[#3c4043] rounded-[24px] hover:border-[#8ab4f8]/50 hover:bg-[#1e1f20]/60 transition-all group flex flex-col gap-3"
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="text-[9px] font-bold text-[#8ab4f8] uppercase tracking-[2px]">{session.agentState?.techStack || 'Project'}</span>
-                        <div className="text-right">
-                          <p className="text-[9px] text-[#5f6368] font-mono">{dateStr}</p>
-                          <p className="text-[8px] text-[#5f6368] font-mono opacity-60">{timeStr}</p>
-                        </div>
-                      </div>
-                      <p className="text-sm font-medium text-white truncate w-full group-hover:text-[#8ab4f8] transition-colors">
-                        {session.repoUrl ? session.repoUrl.replace('https://github.com/', '') : 'Unknown Repository'}
-                      </p>
-                      <div className="flex items-center gap-3 pt-1">
-                        <div className="flex-1 h-1 bg-[#131314] rounded-full overflow-hidden">
-                          <div className="h-full bg-[#81c995] transition-all" style={{ width: `${session.agentState?.confidence || 0}%` }}></div>
-                        </div>
-                        <span className="text-[9px] font-bold text-[#81c995] whitespace-nowrap">{session.agentState?.confidence || 0}% STABLE</span>
-                      </div>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-center py-20 opacity-40">
-                  <div className="text-[#5f6368] mb-6">
-                    <span className="material-symbols-outlined text-6xl">folder_off</span>
+            
+            <div className="space-y-6 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+              {history.length > 0 ? history.map((session) => (
+                <button 
+                  key={session.id} 
+                  onClick={() => onLoadSession?.(session)} 
+                  className="w-full p-6 bg-[#131314]/50 border border-[#3c4043] rounded-[32px] hover:border-[#8ab4f8]/60 transition-all group flex flex-col text-left gap-4"
+                >
+                  <div className="flex justify-between items-start w-full">
+                    <span className="text-[10px] font-black text-[#8ab4f8] uppercase tracking-[0.1em] max-w-[140px] truncate">
+                      {session.agentState?.techStack || 'Detecting...'}
+                    </span>
+                    <span className="text-[9px] text-[#5f6368] font-mono text-right">
+                      {new Date(session.createdAt?.seconds * 1000).toLocaleDateString()}<br/>
+                      {new Date(session.createdAt?.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
-                  <p className="text-[#9aa0a6] text-sm font-medium">No analysis history found.</p>
-                  <p className="text-[#5f6368] text-xs mt-2 px-6">Your autonomous sessions will appear here once completed.</p>
+                  
+                  <p className="text-sm font-bold text-white truncate w-full group-hover:text-[#8ab4f8] transition-colors">
+                    {session.repoUrl?.split('/').slice(-2).join('/')}
+                  </p>
+
+                  <div className="space-y-2 mt-2">
+                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest">
+                      <div className="h-1 bg-[#81c995]/20 flex-1 rounded-full mr-4 relative overflow-hidden">
+                        <div className="absolute inset-y-0 left-0 bg-[#81c995] rounded-full" style={{ width: '99%' }}></div>
+                      </div>
+                      <span className="text-[#81c995]">99% STABLE</span>
+                    </div>
+                  </div>
+                </button>
+              )) : (
+                <div className="flex flex-col items-center justify-center py-20 opacity-20 text-center">
+                  <span className="material-symbols-outlined text-5xl mb-4">folder_open</span>
+                  <p className="text-sm">No persistent storage found.</p>
                 </div>
               )}
             </div>
-            
-            {history.length > 0 && (
-              <div className="pt-6 mt-6 border-t border-[#3c4043] flex items-center justify-center opacity-40">
-                <p className="text-[10px] font-bold text-[#9aa0a6] uppercase tracking-[1px]">Persistent Storage Active</p>
-              </div>
-            )}
+
+            <div className="mt-10 pt-8 border-t border-[#3c4043] flex items-center justify-center">
+               <span className="text-[10px] font-black text-[#5f6368] uppercase tracking-[0.2em]">Persistent Storage Active</span>
+            </div>
           </div>
         </div>
-
       </div>
 
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 10px; }
+      `}</style>
     </div>
   );
 };

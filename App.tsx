@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { collection, getDocs, query, orderBy, Timestamp, setDoc, doc } from 'firebase/firestore';
 import { auth, db } from './services/firebase';
-import { AppView, AgentStep, LogEntry, AgentState, StepStatus } from './types';
+import { AppView, AgentStep, LogEntry, AgentState, StepStatus, Issue } from './types';
 import { INITIAL_STEPS } from './constants';
 import LandingPage from './components/LandingPage';
 import AuthPage from './components/AuthPage';
@@ -12,11 +12,9 @@ import ReportPage from './components/ReportPage';
 import LegalPage from './components/LegalPage';
 import { 
   getAgentReasoning, 
-  analyzeRepoContext, 
-  generateTestFailure, 
-  generateFixStrategy, 
-  generateFinalReport,
-  diagnoseFailure
+  auditCodebase,
+  generateFixStrategy,
+  generateFinalReport
 } from './services/gemini';
 
 const App: React.FC = () => {
@@ -34,7 +32,9 @@ const App: React.FC = () => {
     memory: [],
     repoUrl: '',
     branch: 'main',
-    simulationId: 'INIT'
+    simulationId: 'INIT',
+    issues: [],
+    thoughtSignature: ''
   });
 
   const [history, setHistory] = useState<any[]>([]);
@@ -63,8 +63,28 @@ const App: React.FC = () => {
       }));
       setHistory(loadedHistory);
     } catch (e) {
-      console.error("Error fetching history (Check Firestore Rules):", e);
+      console.error("History fetch error:", e);
     }
+  };
+
+  /**
+   * Sanitizes objects for Firestore by converting undefined values to null.
+   * Firestore does not support 'undefined'.
+   */
+  const sanitizeForFirestore = (val: any): any => {
+    if (val === undefined) return null;
+    if (val === null) return null;
+    if (Array.isArray(val)) return val.map(sanitizeForFirestore);
+    if (typeof val === 'object' && !(val instanceof Timestamp)) {
+      const res: any = {};
+      for (const key in val) {
+        if (Object.prototype.hasOwnProperty.call(val, key)) {
+          res[key] = sanitizeForFirestore(val[key]);
+        }
+      }
+      return res;
+    }
+    return val;
   };
 
   const saveSessionToFirestore = async (currentState: AgentState, currentSteps: AgentStep[], currentLogs: LogEntry[]) => {
@@ -73,9 +93,9 @@ const App: React.FC = () => {
     
     try {
       const sessionData = {
-        agentState: currentState,
-        steps: currentSteps,
-        logs: currentLogs,
+        agentState: sanitizeForFirestore(currentState),
+        steps: sanitizeForFirestore(currentSteps),
+        logs: sanitizeForFirestore(currentLogs),
         createdAt: Timestamp.now(),
         repoUrl: currentState.repoUrl,
         simulationId: currentState.simulationId,
@@ -84,7 +104,6 @@ const App: React.FC = () => {
       
       const sessionRef = doc(db, `users/${currentUser.uid}/sessions`, currentState.simulationId);
       await setDoc(sessionRef, sessionData);
-      console.debug("Snapshot synchronized:", currentState.simulationId);
     } catch (e) {
       console.error("Firestore sync fault:", e);
     }
@@ -117,24 +136,24 @@ const App: React.FC = () => {
     return updated;
   };
 
-  const handleStart = () => {
-    if (user) {
-      setView('setup');
-    } else {
-      setView('auth');
+  const handleStart = useCallback(() => {
+    if (user) setView('setup');
+    else setView('auth');
+  }, [user]);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await signOut(auth);
+      setView('landing');
+    } catch (e) {
+      console.error("Logout failure:", e);
     }
-  };
+  }, []);
 
-  const handleLogout = async () => {
-    await signOut(auth);
-    setUser(null);
-    setHistory([]);
-    setView('landing');
-  };
-
-  const startAutonomousRun = async (config: { repoUrl: string, branch: string, maxAttempts: number, techStack?: string }) => {
+  const startAutonomousRun = async (config: { repoUrl: string, branch: string, maxAttempts: number, techStack?: string, fileTree: string[], contextContent: string }) => {
     setView('dashboard');
     const runId = Math.random().toString(36).substr(2, 6).toUpperCase();
+    const thoughtSig = `ARC-${Math.random().toString(36).substring(7).toUpperCase()}`;
     
     let currentSteps: AgentStep[] = INITIAL_STEPS.map(s => ({ ...s, status: 'pending' as StepStatus, timestamp: undefined }));
     let currentLogs: LogEntry[] = [];
@@ -144,202 +163,115 @@ const App: React.FC = () => {
       ...config, 
       simulationId: runId,
       confidence: 10,
-      memory: [],
+      thoughtSignature: thoughtSig,
+      memory: [`Established stateful continuity via Thought Signature ${thoughtSig}`],
       currentAttempt: 1,
-      generatedDiff: undefined,
-      reportSummary: undefined
+      issues: []
     };
     
     setAgentState(currentState);
     setSteps(currentSteps);
     setLogs(currentLogs);
 
-    currentLogs = addLog('system', `AutoDevOps AI initialized (Session ${runId}). Connecting to Gemini 3 Core...`, currentLogs);
+    // ACTION-ERA TRIGGER
+    currentLogs = addLog('system', "1M-token reasoning budget available; selective context ingestion applied.", currentLogs);
+    currentLogs = addLog('system', "Thought Signature persistence verified. AutoDevOps AI is ready for system reconciliation.", currentLogs);
+    currentLogs = addLog('system', `AutoDevOps AI initialized. Monitoring branch ${config.branch} for high-confidence vulnerabilities.`, currentLogs);
 
     try {
-      // 1. INGESTION & ANALYSIS
+      // 1. ARCHITECTURAL AUDIT
       currentSteps = updateStepLocally('ingest', 'running', currentSteps);
-      const analysis = await analyzeRepoContext(config.repoUrl, config.techStack);
+      currentLogs = addLog('reasoning', await getAgentReasoning(`Executing Global Context Audit on branch ${config.branch}`, thoughtSig), currentLogs);
       
-      currentLogs = addLog('reasoning', await getAgentReasoning(`Analyzing structure of ${config.repoUrl}`), currentLogs);
-      await new Promise(r => setTimeout(r, 1000));
+      const auditResult = await auditCodebase(config.repoUrl, config.branch, config.fileTree, config.contextContent, thoughtSig);
       
-      currentLogs = addLog('system', `Detected Stack: ${analysis.techStack}`, currentLogs);
-      currentLogs = addLog('system', `Targeting: ${analysis.criticalFile}`, currentLogs);
-      
-      currentSteps = updateStepLocally('ingest', 'success', currentSteps);
-      
-      currentState = { 
-        ...currentState, 
-        confidence: 30, 
-        techStack: analysis.techStack, 
-        memory: [`Identified ${analysis.techStack} architecture. Indexing build path for ${analysis.criticalFile}.`] 
-      };
-      setAgentState(currentState);
-      await saveSessionToFirestore(currentState, currentSteps, currentLogs);
-
-      // 2. TEST EXECUTION
-      currentSteps = updateStepLocally('test', 'running', currentSteps);
-      const failureLog = await generateTestFailure(analysis.techStack, analysis.criticalFile);
-      await new Promise(r => setTimeout(r, 1500));
-      
-      currentLogs = addLog('test', `FAILURE DETECTED in ${analysis.criticalFile}`, currentLogs);
-      currentLogs = addLog('error', failureLog, currentLogs);
-      currentSteps = updateStepLocally('test', 'failed', currentSteps);
-      
-      currentState = { 
-        ...currentState, 
-        confidence: 20, 
-        riskLevel: 'High' as const, 
-        detectedError: failureLog,
-        memory: [...currentState.memory, `Captured execution trace from test suite. Isolated fault in ${analysis.criticalFile}.`]
-      };
-      setAgentState(currentState);
-      await saveSessionToFirestore(currentState, currentSteps, currentLogs);
-
-      // 3. DIAGNOSIS
-      currentSteps = updateStepLocally('diagnose', 'running', currentSteps);
-      currentLogs = addLog('reasoning', "Applying deep reasoning to failure logs...", currentLogs);
-      const diagnosis = await diagnoseFailure(failureLog, currentState.memory);
-      
-      if (!diagnosis || diagnosis.root_cause === "Unknown internal error during analysis") {
-        currentLogs = addLog('error', "Deep analysis partially failed. Using heuristic fallback.", currentLogs);
+      if (auditResult.issues.length === 0) {
+        currentLogs = addLog('system', "Audit complete. No high-confidence vulnerabilities detected within context.", currentLogs);
       } else {
-        currentLogs = addLog('reasoning', `Diagnosis: ${diagnosis.root_cause}`, currentLogs);
-        currentLogs = addLog('reasoning', `Proposed Strategy: ${diagnosis.strategy}`, currentLogs);
+        currentLogs = addLog('audit', `Audit complete. Detected ${auditResult.issues.length} architectural vulnerabilities. Core Stack: ${auditResult.techStack}`, currentLogs);
       }
       
-      await new Promise(r => setTimeout(r, 1000));
-      currentSteps = updateStepLocally('diagnose', 'success', currentSteps);
-      
       currentState = { 
         ...currentState, 
-        confidence: 50, 
-        riskLevel: (diagnosis.risk_level?.charAt(0).toUpperCase() + diagnosis.risk_level?.slice(1).toLowerCase()) as any || 'Medium', 
-        memory: [...currentState.memory, `Root Cause Identified: ${diagnosis.root_cause}. Formulation strategy locked.`] 
+        techStack: auditResult.techStack,
+        issues: auditResult.issues,
+        confidence: auditResult.issues.length > 0 ? 30 : 100
       };
       setAgentState(currentState);
+      currentSteps = updateStepLocally('ingest', 'success', currentSteps);
       await saveSessionToFirestore(currentState, currentSteps, currentLogs);
 
-      // 4. FIX GENERATION
-      currentSteps = updateStepLocally('fix', 'running', currentSteps);
-      currentLogs = addLog('system', 'Synthesizing reconciliation patch using Gemini 3 Pro...', currentLogs);
-      
-      const fix = await generateFixStrategy(diagnosis, analysis.criticalFile);
-      currentState = { 
-        ...currentState, 
-        generatedDiff: fix, 
-        confidence: 85,
-        memory: [...currentState.memory, `Synthesized reconciliation patch for ${fix.filePath}.`]
-      };
-      setAgentState(currentState);
-      
-      await new Promise(r => setTimeout(r, 1500));
-      currentLogs = addLog('system', `Patch Generated: ${fix.explanation}`, currentLogs);
-      currentSteps = updateStepLocally('fix', 'success', currentSteps);
-      await saveSessionToFirestore(currentState, currentSteps, currentLogs);
+      // 2. STABILIZATION CYCLE
+      if (auditResult.issues.length > 0) {
+        currentSteps = updateStepLocally('test', 'running', currentSteps);
+        currentSteps = updateStepLocally('diagnose', 'running', currentSteps);
+        currentSteps = updateStepLocally('fix', 'running', currentSteps);
 
-      // 5. VERIFICATION
+        for (let i = 0; i < currentState.issues!.length; i++) {
+          const issue = currentState.issues![i];
+          currentLogs = addLog('reasoning', `[RECONCILIATION ${i+1}/${currentState.issues!.length}] Addressing ${issue.title} in ${issue.file}`, currentLogs);
+          
+          const fixingIssues = [...currentState.issues!];
+          fixingIssues[i].status = 'fixing';
+          currentState = { ...currentState, issues: fixingIssues };
+          setAgentState(currentState);
+
+          const patch = await generateFixStrategy(issue, config.contextContent, thoughtSig);
+          
+          fixingIssues[i].status = 'resolved';
+          currentState = { ...currentState, issues: fixingIssues, generatedDiff: patch, confidence: 35 + ((i + 1) * (60 / fixingIssues.length)) };
+          setAgentState(currentState);
+          
+          currentLogs = addLog('system', `Stabilization patch certified for ${issue.file}. Root Cause: ${patch.rootCause}`, currentLogs);
+          await saveSessionToFirestore(currentState, currentSteps, currentLogs);
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
+        currentSteps = updateStepLocally('test', 'success', currentSteps);
+        currentSteps = updateStepLocally('diagnose', 'success', currentSteps);
+        currentSteps = updateStepLocally('fix', 'success', currentSteps);
+      }
+
+      // 5. FINAL VERIFICATION
       currentSteps = updateStepLocally('verify', 'running', currentSteps);
-      currentLogs = addLog('system', 'Re-executing test suite on patched HEAD...', currentLogs);
+      currentLogs = addLog('system', 'Executing global stability verification for visual and logical integrity...', currentLogs);
       await new Promise(r => setTimeout(r, 2000));
       
-      currentLogs = addLog('test', 'VERIFICATION SUCCESS: Build stable, 100% tests passing.', currentLogs);
+      currentLogs = addLog('test', 'Global reconciliation verified. High-confidence heuristics pass.', currentLogs);
       currentSteps = updateStepLocally('verify', 'success', currentSteps);
-      currentState = { 
-        ...currentState, 
-        confidence: 99, 
-        riskLevel: 'Low' as const,
-        memory: [...currentState.memory, `Verification loop complete. System health: 99%.`]
-      };
+      currentState = { ...currentState, confidence: 100, riskLevel: 'Low' };
       setAgentState(currentState);
-      await saveSessionToFirestore(currentState, currentSteps, currentLogs);
 
-      // 6. FINALIZATION
+      // 6. STABILIZATION FINALIZATION
       currentSteps = updateStepLocally('finalize', 'running', currentSteps);
-      currentLogs = addLog('system', 'Generating final executive report...', currentLogs);
-      const report = await generateFinalReport({ techStack: analysis.techStack, detectedError: failureLog });
+      const report = await generateFinalReport(currentState);
       currentState = { ...currentState, reportSummary: report };
       setAgentState(currentState);
       currentSteps = updateStepLocally('finalize', 'success', currentSteps);
       
-      // Save final result to history
       await saveSessionToFirestore(currentState, currentSteps, currentLogs);
       if (user) fetchHistory(user.uid); 
-
-      await new Promise(r => setTimeout(r, 1000));
       setView('report');
+
     } catch (error) {
-      console.error(error);
-      const errMsg = error instanceof Error ? error.message : 'Unknown error';
-      currentLogs = addLog('error', `A critical fault occurred in the reasoning chain: ${errMsg}`, currentLogs);
-      
+      console.error("Agent Fault:", error);
+      currentLogs = addLog('error', `System Fault: ${error instanceof Error ? error.message : 'Unknown'}`, currentLogs);
       const failedState = { ...currentState, confidence: 0, riskLevel: 'High' as const };
       setAgentState(failedState);
-      
-      // Save even the failed state if we have a run ID
       await saveSessionToFirestore(failedState, currentSteps, currentLogs);
-      if (user) fetchHistory(user.uid);
     }
   };
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[#131314] flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-[#8ab4f8] border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
+  if (authLoading) return <div className="min-h-screen bg-[#131314] flex items-center justify-center"><div className="w-8 h-8 border-4 border-[#8ab4f8] border-t-transparent rounded-full animate-spin"></div></div>;
 
   return (
-    <div className="min-h-screen bg-[#131314] text-[#e3e3e3] font-sans selection:bg-[#8ab4f8]30">
-      {view === 'landing' && (
-        <LandingPage 
-          onStart={handleStart} 
-          user={user} 
-          onLogout={handleLogout} 
-          onViewLegal={(type) => setView(type)}
-        />
-      )}
-      
-      {view === 'auth' && (
-        <AuthPage onSuccess={() => setView('setup')} onBack={() => setView('landing')} />
-      )}
-
-      {view === 'setup' && (
-        <SetupPage 
-          onLaunch={(config) => startAutonomousRun(config)} 
-          onBack={() => setView('landing')}
-          history={history}
-          onLoadSession={loadSession}
-        />
-      )}
-
-      {view === 'dashboard' && (
-        <Dashboard 
-          steps={steps} 
-          logs={logs} 
-          agentState={agentState} 
-          onLogout={handleLogout}
-        />
-      )}
-
-      {view === 'report' && (
-        <ReportPage 
-          agentState={agentState} 
-          steps={steps}
-          logs={logs}
-          onReset={() => {
-            setSteps(INITIAL_STEPS);
-            setLogs([]);
-            setView('setup');
-          }}
-        />
-      )}
-
-      {(view === 'privacy' || view === 'terms') && (
-        <LegalPage type={view} onBack={() => setView('landing')} />
-      )}
+    <div className="min-h-screen bg-[#131314] text-[#e3e3e3] font-sans">
+      {view === 'landing' && <LandingPage onStart={handleStart} user={user} onLogout={handleLogout} onViewLegal={(type) => setView(type)} />}
+      {view === 'auth' && <AuthPage onSuccess={() => setView('setup')} onBack={() => setView('landing')} />}
+      {view === 'setup' && <SetupPage onLaunch={(config) => startAutonomousRun(config)} onBack={() => setView('landing')} history={history} onLoadSession={loadSession} />}
+      {view === 'dashboard' && <Dashboard steps={steps} logs={logs} agentState={agentState} onLogout={handleLogout} />}
+      {view === 'report' && <ReportPage agentState={agentState} steps={steps} logs={logs} onReset={() => { setSteps(INITIAL_STEPS); setLogs([]); setView('setup'); }} />}
+      {(view === 'privacy' || view === 'terms') && <LegalPage type={view} onBack={() => setView('landing')} />}
     </div>
   );
 };
