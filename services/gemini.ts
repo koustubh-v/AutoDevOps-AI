@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CodeFix, Issue } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
 const MODEL_FAST = 'gemini-3-flash-preview';
 const MODEL_REASONING = 'gemini-3-pro-preview';
@@ -42,7 +42,7 @@ OUTPUT REQUIREMENTS:
  */
 const extractText = (response: any): string => {
   if (!response) return "";
-  
+
   // Directly access the text property as per guidelines
   try {
     const textValue = response.text;
@@ -58,7 +58,7 @@ const extractText = (response: any): string => {
       .map((part: any) => part.text)
       .join("");
   }
-  
+
   return "";
 };
 

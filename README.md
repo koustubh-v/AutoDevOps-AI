@@ -100,9 +100,8 @@ graph TD
 npm install
 
 # Configure Environment
-# Create a .env.local file and add your keys:
-echo "VITE_GEMINI_API_KEY=your_key_here" > .env.local
-echo "VITE_FIREBASE_CONFIG=your_firebase_config_here" >> .env.local
+# Copy .env.sample to .env and fill in your credentials
+cp .env.sample .env
 
 # Run the Agent Dashboard
 npm run dev
