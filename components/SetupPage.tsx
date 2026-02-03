@@ -157,7 +157,7 @@ const SetupPage: React.FC<SetupPageProps> = ({ onLaunch, onBack, history = [], o
               <div className="flex justify-between items-center">
                 <label className="text-xs font-medium text-[#c4c7c5] ml-1">Repository URL</label>
                 <button
-                  onClick={() => setRepo('https://github.com/google-labs/test-repo')}
+                  onClick={() => setRepo('https://github.com/koustubh-v/Demo-Buggy-Repo')}
                   className="text-xs font-medium text-[#8ab4f8] hover:bg-[#8ab4f8]/10 px-3 py-1 rounded-full transition-colors"
                 >
                   Load Demo
