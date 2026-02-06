@@ -310,7 +310,9 @@ const Dashboard: React.FC<DashboardProps> = ({ steps, logs, agentState, onLogout
              </div>
              <div className="bg-[#2d2e30] p-4 rounded-2xl flex flex-col items-center justify-center text-center relative overflow-hidden">
                 <div className="absolute inset-0 bg-[#81c995]/5"></div>
-                <span className="text-2xl font-medium text-[#81c995] mb-1">{agentState.confidence}%</span>
+                <span className="text-2xl font-medium text-[#81c995] mb-1">
+                  {Number(agentState.confidence).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%
+                </span>
                 <span className="text-xs text-[#9aa0a6]">Confidence</span>
              </div>
           </div>
