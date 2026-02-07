@@ -9,11 +9,20 @@
     Powered by <strong>Google Gemini 3.0</strong>, it acts as a virtual Site Reliability Engineer (SRE) that recursively reasons about system architecture, detects high-confidence vulnerabilities, and generates precise, verified fixes.
   </p>
 
+  <h3>Why AutoDevOps AI?</h3>
+  <p align="left">
+    Modern AI tools assist engineers by suggesting fixes, but stop short of execution, verification, and accountability. In real production incidents, this gap forces humans to manually copy, run, and trust AI-generated code under pressure.
+  </p>
+  <p align="left">
+    AutoDevOps AI closes this gap by introducing an autonomous agent that not only reasons about failures, but acts, verifies outcomes, and intentionally stops within defined safety boundaries.
+  </p>
+
   <p>
     <a href="#-architecture">Architecture</a> •
     <a href="#-tech-stack">Tech Stack</a> •
     <a href="#-features">Features</a> •
     <a href="#-getting-started">Getting Started</a> •
+    <a href="https://youtu.be/dgL-hi2QSpw">Demo Video</a> •
     <a href="./backend-simple/README.md">Backend Service</a>
   </p>
 </div>
@@ -23,6 +32,8 @@
 ## 🏗 Architecture
 
 AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git repositories. It uses a hybrid architecture: a **React-based Autonomous Agent** for reasoning and state management, and a **Lightweight Python Microservice** for secure file operations.
+
+> Each execution occurs in an isolated, ephemeral sandbox; source code is automatically destroyed after analysis, while audit artifacts are preserved.
 
 ![Architecture Diagram](architecture.png)
 
@@ -53,9 +64,9 @@ AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git 
 
 ## 🚀 Features
 
-- **🛡 Autonomous Auditing**: Scans codebases for security risks, performance bottlenecks, and anti-patterns without configuration.
-- **🧠 Recursive Reasoning**: Doesn't just "guess." It maintains an internal monologue (Thought Signature) to rationalize its decisions similar to a human engineer.
-- **🔧 Self-Healing**: Automatically generates precise code patches to fix detected issues.
+- **🛡 Autonomous Auditing**: Executes tests and analyzes failures to identify high-confidence bugs and architectural risks present in the current branch context.
+- **🧠 Recursive Reasoning**: Maintains a persistent "Thought Signature" audit log to rationalize decisions, ensuring transparency and consistency across fix attempts.
+- **🔧 Self-Healing**: Generates and applies targeted code patches, verifying fixes against the test suite to prevent regressions.
 - **📊 Live Mission Control**: Watch the agent "think" in real-time via a strictly typed event log dashboard.
 - **🔒 Secure Sandboxing**: all code operations happen in isolated sessions that are automatically purged.
 
