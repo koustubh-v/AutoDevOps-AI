@@ -24,32 +24,7 @@
 
 AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git repositories. It uses a hybrid architecture: a **React-based Autonomous Agent** for reasoning and state management, and a **Lightweight Python Microservice** for secure file operations.
 
-```mermaid
-graph TD
-    subgraph "Client Layer (Browser)"
-        UI[React Dashboard] <--> Agent[Autonomous Agent Logic]
-        Agent <--> Firebase[Firebase Firestore]
-    end
-
-    subgraph "Reasoning Layer"
-        Agent -- "Recursive Reasoning & Audit" --> Gemini[Google Gemini 3.0 Pro API]
-        Gemini -- "Fix Strategies & Reports" --> Agent
-    end
-
-    subgraph "Infrastructure Layer"
-        Agent -- "Clone & File Ops" --> API[Python FastAPI Microservice]
-        API -- "git clone / IO" --> Git[Target Repository]
-        API -- "Serve Content" --> Agent
-    end
-
-    classDef ai fill:#4285F4,stroke:#fff,color:#fff;
-    classDef infra fill:#34A853,stroke:#fff,color:#fff;
-    classDef client fill:#EA4335,stroke:#fff,color:#fff;
-
-    class Gemini ai;
-    class API,Git infra;
-    class UI,Agent,Firebase client;
-```
+![Architecture Diagram](architecture.png)
 
 ### Core Flow
 1. **Ingest**: User provides a repository URL. The agent requests the backend to clone it securely to a temporary sandbox.
