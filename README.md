@@ -5,25 +5,26 @@
   <h3>Autonomous SRE & Self-Healing Codebase System</h3>
 
   <p>
-    <strong>AutoDevOps AI</strong> is a next-generation autonomous agent built to audit, diagnose, and stabilize codebases without human intervention.
-    Powered by <strong>Google Gemini 3.0</strong>, it acts as a virtual Site Reliability Engineer (SRE) that recursively reasons about system architecture, detects high-confidence vulnerabilities, and generates precise, verified fixes.
-  </p>
-
-  <h3>Why AutoDevOps AI?</h3>
-  <p align="left">
-    Modern AI tools assist engineers by suggesting fixes, but stop short of execution, verification, and accountability. In real production incidents, this gap forces humans to manually copy, run, and trust AI-generated code under pressure.
-  </p>
-  <p align="left">
-    AutoDevOps AI closes this gap by introducing an autonomous agent that not only reasons about failures, but acts, verifies outcomes, and intentionally stops within defined safety boundaries.
-  </p>
-
-  <p>
     <a href="#-architecture">Architecture</a> •
     <a href="#-tech-stack">Tech Stack</a> •
     <a href="#-features">Features</a> •
     <a href="#-getting-started">Getting Started</a> •
     <a href="https://youtu.be/dgL-hi2QSpw">Demo Video</a> •
     <a href="./backend-simple/README.md">Backend Service</a>
+  </p>
+
+  <p>
+    <strong>AutoDevOps AI</strong> is a next-generation autonomous agent built to audit, diagnose, and stabilize codebases without human intervention.
+    Powered by <strong>Google Gemini 3.0</strong>, it acts as a virtual Site Reliability Engineer (SRE) that recursively reasons about system architecture, detects high-confidence vulnerabilities, and generates precise, verified fixes.
+  </p>
+  </div>
+<div align="left">
+  <h3>Why AutoDevOps AI?</h3>
+  <p align="left">
+    Modern AI tools assist engineers by suggesting fixes, but stop short of execution, verification, and accountability. In real production incidents, this gap forces humans to manually copy, run, and trust AI-generated code under pressure.
+  </p>
+  <p align="left">
+    AutoDevOps AI closes this gap by introducing an autonomous agent that not only reasons about failures, but acts, verifies outcomes, and intentionally stops within defined safety boundaries.
   </p>
 </div>
 
