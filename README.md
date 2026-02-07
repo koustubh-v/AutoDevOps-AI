@@ -52,7 +52,7 @@ AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git 
 ### **Frontend (The Brain)**
 - **React 19**: Utilizing the latest concurrent features for smooth agent state updates.
 - **Vite**: Blazing fast build tool and dev server.
-- **Google GenAI SDK**: Direct integration with Gemini 1.5/3.0 models for high-speed inference.
+- **Google GenAI SDK**: Direct integration with Gemini 3.0 models for high-speed inference.
 - **Firebase**: Firestore for persisting agent sessions, logs, and simulation history.
 - **Tailwind CSS**: Rapid, utility-first styling for the mission control dashboard.
 
