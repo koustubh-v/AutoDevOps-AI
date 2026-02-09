@@ -65,11 +65,11 @@ AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git 
 
 ## Features
 
-- ** Autonomous Auditing**: Executes tests and analyzes failures to identify high-confidence bugs and architectural risks present in the current branch context.
-- ** Recursive Reasoning**: Maintains a persistent "Thought Signature" audit log to rationalize decisions, ensuring transparency and consistency across fix attempts.
-- ** Self-Healing**: Generates and applies targeted code patches, verifying fixes against the test suite to prevent regressions.
-- ** Live Mission Control**: Watch the agent "think" in real-time via a strictly typed event log dashboard.
-- ** Secure Sandboxing**: all code operations happen in isolated sessions that are automatically purged.
+- **Autonomous Auditing**: Executes tests and analyzes failures to identify high-confidence bugs and architectural risks present in the current branch context.
+- **Recursive Reasoning**: Maintains a persistent "Thought Signature" audit log to rationalize decisions, ensuring transparency and consistency across fix attempts.
+- **Self-Healing**: Generates and applies targeted code patches, verifying fixes against the test suite to prevent regressions.
+- **Live Mission Control**: Watch the agent "think" in real-time via a strictly typed event log dashboard.
+- **Secure Sandboxing**: All code operations happen in isolated sessions that are automatically purged.
 
 ---
 
@@ -112,4 +112,4 @@ The frontend will automatically discover the local backend at `http://localhost:
 
 ##  License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
