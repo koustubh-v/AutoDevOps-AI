@@ -30,7 +30,7 @@
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git repositories. It uses a hybrid architecture: a **React-based Autonomous Agent** for reasoning and state management, and a **Lightweight Python Microservice** for secure file operations.
 
@@ -47,7 +47,7 @@ AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git 
 
 ---
 
-## ⚡ Tech Stack
+## Tech Stack
 
 ### **Frontend (The Brain)**
 - **React 19**: Utilizing the latest concurrent features for smooth agent state updates.
@@ -63,17 +63,17 @@ AutoDevOps AI acts as an intelligent orchestrator that interfaces with your Git 
 
 ---
 
-## 🚀 Features
+## Features
 
-- **🛡 Autonomous Auditing**: Executes tests and analyzes failures to identify high-confidence bugs and architectural risks present in the current branch context.
-- **🧠 Recursive Reasoning**: Maintains a persistent "Thought Signature" audit log to rationalize decisions, ensuring transparency and consistency across fix attempts.
-- **🔧 Self-Healing**: Generates and applies targeted code patches, verifying fixes against the test suite to prevent regressions.
-- **📊 Live Mission Control**: Watch the agent "think" in real-time via a strictly typed event log dashboard.
-- **🔒 Secure Sandboxing**: all code operations happen in isolated sessions that are automatically purged.
+- ** Autonomous Auditing**: Executes tests and analyzes failures to identify high-confidence bugs and architectural risks present in the current branch context.
+- ** Recursive Reasoning**: Maintains a persistent "Thought Signature" audit log to rationalize decisions, ensuring transparency and consistency across fix attempts.
+- ** Self-Healing**: Generates and applies targeted code patches, verifying fixes against the test suite to prevent regressions.
+- ** Live Mission Control**: Watch the agent "think" in real-time via a strictly typed event log dashboard.
+- ** Secure Sandboxing**: all code operations happen in isolated sessions that are automatically purged.
 
 ---
 
-## 🏁 Getting Started
+##  Getting Started
 
 ### Prerequisites
 - **Node.js** (v18+)
@@ -110,6 +110,6 @@ The frontend will automatically discover the local backend at `http://localhost:
 
 ---
 
-## 📜 License
+##  License
 
 Distributed under the MIT License. See `LICENSE` for more information.
